@@ -6,6 +6,19 @@ pub struct FrgCtx {
     stack: Vec<NodeRef>,
     tmp_buffer_1: Vec<NodeRef>,
     tmp_buffer_2: Vec<NodeRef>,
+    transaction_level: u32,
+}
+
+impl FrgCtx {
+    pub fn batch<R, CALLBACK: FnOnce(&mut Self) -> R>(&mut self, callback: CALLBACK) -> R {
+        self.transaction_level += 1;
+        let result = callback(self);
+        self.transaction_level -= 1;
+        if self.transaction_level == 0 {
+            update_graph(self);
+        }
+        result
+    }
 }
 
 pub struct Signal<A> {

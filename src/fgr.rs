@@ -2,8 +2,6 @@ use std::borrow::Borrow;
 use std::rc::Rc;
 use std::cell::{Ref, RefCell, RefMut};
 
-use bevy::core_pipeline::deferred::node;
-
 #[macro_export]
 macro_rules! cloned {
     (($($arg:ident),*) => $e:expr) => {{
@@ -207,11 +205,15 @@ impl<A: 'static> Signal<A> {
     }
 
     pub fn update_value<CALLBACK: FnOnce(&mut A)>(&mut self, fgr_ctx: &mut FrgCtx, callback: CALLBACK) {
-        let mut impl_ = (*self.impl_).borrow_mut();
-        callback(&mut impl_.value);
-        impl_.value_changed = true;
-        fgr_ctx.stack.push((&*self).into());
-        propergate_dependents_flags_to_stale(fgr_ctx);
+        fgr_ctx.batch(|fgr_ctx| {
+            {
+                let mut impl_ = (*self.impl_).borrow_mut();
+                callback(&mut impl_.value);
+                impl_.value_changed = true;
+            }
+            fgr_ctx.stack.push((&*self).into());
+            propergate_dependents_flags_to_stale(fgr_ctx);
+        });
     }
 }
 

@@ -2,6 +2,15 @@ use std::borrow::Borrow;
 use std::rc::Rc;
 use std::cell::{Ref, RefCell};
 
+#[macro_export]
+macro_rules! cloned {
+    (($($arg:ident),*) => $e:expr) => {{
+        // clone all the args
+        $( let $arg = ::std::clone::Clone::clone(&$arg); )*
+        $e
+    }};
+}
+
 pub struct FrgCtx {
     stack: Vec<NodeRef>,
     tmp_buffer_1: Vec<NodeRef>,
@@ -10,6 +19,15 @@ pub struct FrgCtx {
 }
 
 impl FrgCtx {
+    pub fn new() -> Self {
+        Self {
+            stack: Vec::new(),
+            tmp_buffer_1: Vec::new(),
+            tmp_buffer_2: Vec::new(),
+            transaction_level: 0,
+        }
+    }
+
     pub fn batch<R, CALLBACK: FnOnce(&mut Self) -> R>(&mut self, callback: CALLBACK) -> R {
         self.transaction_level += 1;
         let result = callback(self);
@@ -62,6 +80,15 @@ impl<A> Clone for Memo<A> {
     }
 }
 
+impl<A: 'static> Into<NodeRef> for &Memo<A> {
+    fn into(self) -> NodeRef {
+        let node = Rc::clone(&self.impl_);
+        NodeRef {
+            node,
+        }
+    }
+}
+
 pub struct MemoImpl<A> {
     node_data: NodeData,
     value: A,
@@ -88,6 +115,23 @@ impl<A> IsNode for MemoImpl<A> {
 
 pub struct Signal<A> {
     impl_: Rc<RefCell<SignalImpl<A>>>,
+}
+
+impl<A> Signal<A> {
+    pub fn new(value: A) -> Self {
+        Self {
+            impl_: Rc::new(RefCell::new(SignalImpl {
+                node_data: NodeData {
+                    flag: NodeFlag::Ready,
+                    changed: false,
+                    dependencies: Vec::new(),
+                    dependents: Vec::new(),
+                },
+                value,
+                value_changed: false,
+            })),
+        }
+    }
 }
 
 impl<A> Clone for Signal<A> {

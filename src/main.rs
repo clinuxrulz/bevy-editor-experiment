@@ -5,3 +5,6 @@ pub mod fgr;
 fn main() {
     App::new().run();
 }
+
+#[cfg(test)]
+mod tests;

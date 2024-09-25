@@ -1,6 +1,8 @@
 use std::borrow::Borrow;
 use std::rc::Rc;
-use std::cell::{Ref, RefCell};
+use std::cell::{Ref, RefCell, RefMut};
+
+use bevy::core_pipeline::deferred::node;
 
 #[macro_export]
 macro_rules! cloned {
@@ -12,6 +14,7 @@ macro_rules! cloned {
 }
 
 pub struct FrgCtx {
+    current_observer: Option<NodeRef>,
     stack: Vec<NodeRef>,
     tmp_buffer_1: Vec<NodeRef>,
     tmp_buffer_2: Vec<NodeRef>,
@@ -21,6 +24,7 @@ pub struct FrgCtx {
 impl FrgCtx {
     pub fn new() -> Self {
         Self {
+            current_observer: None,
             stack: Vec::new(),
             tmp_buffer_1: Vec::new(),
             tmp_buffer_2: Vec::new(),
@@ -43,18 +47,18 @@ pub struct Memo<A> {
     impl_: Rc<RefCell<MemoImpl<A>>>,
 }
 
-impl<A> Memo<A> {
-    pub fn new(update_fn: impl Fn() -> A + 'static) -> Self
+impl<A: 'static> Memo<A> {
+    pub fn new(fgr_ctx: &mut FrgCtx, update_fn: impl Fn(&mut FrgCtx) -> A + 'static) -> Self
     where A: PartialEq<A>
     {
-        Self::new_with_diff(update_fn, |a, b| a == b)        
+        Self::new_with_diff(fgr_ctx, update_fn, |a, b| a == b)        
     }
 
-    pub fn new_no_diff(update_fn: impl Fn() -> A + 'static) -> Self {
-        Self::new_with_diff(update_fn, |_a, _b| false)
+    pub fn new_no_diff(fgr_ctx: &mut FrgCtx, update_fn: impl Fn(&mut FrgCtx) -> A + 'static) -> Self {
+        Self::new_with_diff(fgr_ctx, update_fn, |_a, _b| false)
     }
 
-    pub fn new_with_diff(update_fn: impl Fn() -> A + 'static, compare_fn: impl Fn(&A, &A) -> bool + 'static) -> Self {
+    pub fn new_with_diff(fgr_ctx: &mut FrgCtx, update_fn: impl Fn(&mut FrgCtx) -> A + 'static, compare_fn: impl Fn(&A, &A) -> bool + 'static) -> Self {
         let impl_ = Rc::new(RefCell::new(MemoImpl {
             node_data: NodeData {
                 flag: NodeFlag::Ready,
@@ -62,13 +66,21 @@ impl<A> Memo<A> {
                 dependencies: Vec::new(),
                 dependents: Vec::new(),
             },
-            value: update_fn(),
+            value: None,
             update_fn: Box::new(update_fn),
             compare_fn: Box::new(compare_fn),
         }));
-        Self {
+        let result = Self {
             impl_,
+        };
+        let self_ref: NodeRef = (&result).into();
+        fgr_ctx.current_observer = Some(self_ref);
+        {
+            let mut tmp: RefMut<MemoImpl<A>> = (&*result.impl_).borrow_mut();
+            let value = (tmp.update_fn)(fgr_ctx);
+            tmp.value = Some(value);
         }
+        result
     }
 }
 
@@ -91,8 +103,8 @@ impl<A: 'static> Into<NodeRef> for &Memo<A> {
 
 pub struct MemoImpl<A> {
     node_data: NodeData,
-    value: A,
-    update_fn: Box<dyn Fn() -> A>,
+    value: Option<A>, // <-- only temporarly None during initialization.
+    update_fn: Box<dyn Fn(&mut FrgCtx) -> A>,
     compare_fn: Box<dyn Fn(&A, &A) -> bool>,
 }
 
@@ -105,10 +117,10 @@ impl<A> IsNode for MemoImpl<A> {
         &mut self.node_data
     }
 
-    fn update(&mut self) -> bool {
-        let next_value = (self.update_fn)();
-        let changed = (self.compare_fn)(&next_value, &self.value);
-        self.value = next_value;
+    fn update(&mut self, fgr_ctx: &mut FrgCtx) -> bool {
+        let next_value = (self.update_fn)(fgr_ctx);
+        let changed = (self.compare_fn)(&next_value, self.value.as_ref().unwrap());
+        self.value = Some(next_value);
         changed
     }
 }
@@ -118,7 +130,7 @@ pub struct Signal<A> {
 }
 
 impl<A> Signal<A> {
-    pub fn new(value: A) -> Self {
+    pub fn new(_fgr_ctx: &mut FrgCtx, value: A) -> Self {
         Self {
             impl_: Rc::new(RefCell::new(SignalImpl {
                 node_data: NodeData {
@@ -151,7 +163,6 @@ impl<A: 'static> Into<NodeRef> for &Signal<A> {
     }
 }
 
-
 struct SignalImpl<A> {
     node_data: NodeData,
     value: A,
@@ -167,7 +178,7 @@ impl<A> IsNode for SignalImpl<A> {
         &mut self.node_data
     }
 
-    fn update(&mut self) -> bool {
+    fn update(&mut self, _fgr_ctx: &mut FrgCtx) -> bool {
         let result = self.value_changed;
         self.value_changed = false;
         result
@@ -175,7 +186,20 @@ impl<A> IsNode for SignalImpl<A> {
 }
 
 impl<A: 'static> Signal<A> {
-    pub fn value<'a>(&'a self) -> Ref<'_, A> {
+    pub fn value<'a>(&'a self, fgr_ctx: &mut FrgCtx) -> Ref<'_, A> {
+        if let Some(observer_node) = fgr_ctx.current_observer.as_mut() {
+            let self_ref: NodeRef = self.into();
+            observer_node.with_node_mut(|node| {
+                if !node.node_data_mut().dependencies.contains(&self_ref) {
+                    node.node_data_mut().dependencies.push(self_ref.clone());
+                }
+            });
+            self_ref.with_node_mut(|node| {
+                if !node.node_data_mut().dependents.contains(&observer_node) {
+                    node.node_data_mut().dependents.push(observer_node.clone());
+                }
+            });
+        }
         let impl_ = (*self.impl_).borrow();
         let val = Ref::map(impl_, |impl_| &impl_.value);
         val
@@ -206,11 +230,17 @@ struct NodeData {
 trait IsNode {
     fn node_data(&self) -> &NodeData;
     fn node_data_mut(&mut self) -> &mut NodeData;
-    fn update(&mut self) -> bool;
+    fn update(&mut self, fgr_ctx: &mut FrgCtx) -> bool;
 }
 
 pub struct NodeRef {
     node: Rc<RefCell<dyn IsNode>>,
+}
+
+impl PartialEq for NodeRef {
+    fn eq(&self, other: &Self) -> bool {
+        Rc::ptr_eq(&self.node, &other.node)
+    }
 }
 
 impl Clone for NodeRef {
@@ -239,9 +269,12 @@ impl NodeRef {
 }
 
 fn update_graph(fgr_ctx: &mut FrgCtx) {
-    let tmp_buffer_1 = &mut fgr_ctx.tmp_buffer_1;
-    let tmp_buffer_2 = &mut fgr_ctx.tmp_buffer_2;
-    let stack = &mut fgr_ctx.stack;
+    let mut tmp_buffer_1 = Vec::new();
+    let mut tmp_buffer_2 = Vec::new();
+    let mut stack = Vec::new();
+    std::mem::swap(&mut fgr_ctx.tmp_buffer_1, &mut tmp_buffer_1);
+    std::mem::swap(&mut fgr_ctx.tmp_buffer_2, &mut tmp_buffer_2);
+    std::mem::swap(&mut fgr_ctx.stack, &mut stack);
     loop {
         let Some(node) = stack.pop() else { break; };
         let flag = node.with_node(|n| n.node_data().flag);
@@ -275,7 +308,7 @@ fn update_graph(fgr_ctx: &mut FrgCtx) {
                 tmp_buffer_2.clear();
                 if !has_stale_dependencies && any_depdencies_changed {
                     let changed = node.with_node_mut(|n| {
-                        let changed = n.update();
+                        let changed = n.update(fgr_ctx);
                         let n2 = n.node_data_mut();
                         n2.changed = changed;
                         n2.flag = NodeFlag::Ready;

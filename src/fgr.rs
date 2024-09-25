@@ -211,8 +211,11 @@ impl<A: 'static> Signal<A> {
                 callback(&mut impl_.value);
                 impl_.value_changed = true;
             }
+            // add self to stack for propergating dependent flags to stale.
             fgr_ctx.stack.push((&*self).into());
             propergate_dependents_flags_to_stale(fgr_ctx);
+            // add self to stack (again) for starting point to track updates.
+            fgr_ctx.stack.push((&*self).into());
         });
     }
 }

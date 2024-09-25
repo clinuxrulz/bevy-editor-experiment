@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 
-mod fgr;
+pub mod fgr;
 
 fn main() {
     App::new().run();

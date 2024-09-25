@@ -1,6 +1,6 @@
 use std::borrow::Borrow;
 use std::rc::Rc;
-use std::cell::{Ref, RefCell, RefMut};
+use std::cell::{Ref, RefCell};
 
 pub struct FrgCtx {
     stack: Vec<NodeRef>,
@@ -18,6 +18,71 @@ impl FrgCtx {
             update_graph(self);
         }
         result
+    }
+}
+
+pub struct Memo<A> {
+    impl_: Rc<RefCell<MemoImpl<A>>>,
+}
+
+impl<A> Memo<A> {
+    pub fn new(update_fn: impl Fn() -> A + 'static) -> Self
+    where A: PartialEq<A>
+    {
+        Self::new_with_diff(update_fn, |a, b| a == b)        
+    }
+
+    pub fn new_no_diff(update_fn: impl Fn() -> A + 'static) -> Self {
+        Self::new_with_diff(update_fn, |_a, _b| false)
+    }
+
+    pub fn new_with_diff(update_fn: impl Fn() -> A + 'static, compare_fn: impl Fn(&A, &A) -> bool + 'static) -> Self {
+        let impl_ = Rc::new(RefCell::new(MemoImpl {
+            node_data: NodeData {
+                flag: NodeFlag::Ready,
+                changed: false,
+                dependencies: Vec::new(),
+                dependents: Vec::new(),
+            },
+            value: update_fn(),
+            update_fn: Box::new(update_fn),
+            compare_fn: Box::new(compare_fn),
+        }));
+        Self {
+            impl_,
+        }
+    }
+}
+
+impl<A> Clone for Memo<A> {
+    fn clone(&self) -> Self {
+        Self {
+            impl_: Rc::clone(&self.impl_),
+        }
+    }
+}
+
+pub struct MemoImpl<A> {
+    node_data: NodeData,
+    value: A,
+    update_fn: Box<dyn Fn() -> A>,
+    compare_fn: Box<dyn Fn(&A, &A) -> bool>,
+}
+
+impl<A> IsNode for MemoImpl<A> {
+    fn node_data(&self) -> &NodeData {
+        &self.node_data
+    }
+
+    fn node_data_mut(&mut self) -> &mut NodeData {
+        &mut self.node_data
+    }
+
+    fn update(&mut self) -> bool {
+        let next_value = (self.update_fn)();
+        let changed = (self.compare_fn)(&next_value, &self.value);
+        self.value = next_value;
+        changed
     }
 }
 
@@ -90,7 +155,6 @@ enum NodeFlag {
 struct NodeData {
     flag: NodeFlag,
     changed: bool,
-    visited: bool,
     dependencies: Vec<NodeRef>,
     dependents: Vec<NodeRef>,
 }
@@ -99,23 +163,6 @@ trait IsNode {
     fn node_data(&self) -> &NodeData;
     fn node_data_mut(&mut self) -> &mut NodeData;
     fn update(&mut self) -> bool;
-}
-
-struct Node<UPDATE: FnMut() -> bool> {
-    node: NodeData,
-    update: UPDATE,
-}
-
-impl<UPDATE: FnMut() -> bool> IsNode for Node<UPDATE> {
-    fn node_data(&self) -> &NodeData {
-        &self.node
-    }
-    fn node_data_mut(&mut self) -> &mut NodeData {
-        &mut self.node
-    }
-    fn update(&mut self) -> bool {
-        (self.update)()
-    }
 }
 
 pub struct NodeRef {

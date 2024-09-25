@@ -25,6 +25,14 @@ pub struct Signal<A> {
     impl_: Rc<RefCell<SignalImpl<A>>>,
 }
 
+impl<A> Clone for Signal<A> {
+    fn clone(&self) -> Self {
+        Self {
+            impl_: Rc::clone(&self.impl_),
+        }
+    }
+}
+
 impl<A: 'static> Into<NodeRef> for &Signal<A> {
     fn into(self) -> NodeRef {
         let node = Rc::clone(&self.impl_);

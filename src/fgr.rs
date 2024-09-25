@@ -48,17 +48,17 @@ pub struct Memo<A> {
 }
 
 impl<A: 'static> Memo<A> {
-    pub fn new(fgr_ctx: &mut FrgCtx, update_fn: impl Fn(&mut FrgCtx) -> A + 'static) -> Self
+    pub fn new(fgr_ctx: &mut FrgCtx, update_fn: impl FnMut(&mut FrgCtx) -> A + 'static) -> Self
     where A: PartialEq<A>
     {
         Self::new_with_diff(fgr_ctx, update_fn, |a, b| a == b)        
     }
 
-    pub fn new_no_diff(fgr_ctx: &mut FrgCtx, update_fn: impl Fn(&mut FrgCtx) -> A + 'static) -> Self {
+    pub fn new_no_diff(fgr_ctx: &mut FrgCtx, update_fn: impl FnMut(&mut FrgCtx) -> A + 'static) -> Self {
         Self::new_with_diff(fgr_ctx, update_fn, |_a, _b| false)
     }
 
-    pub fn new_with_diff(fgr_ctx: &mut FrgCtx, update_fn: impl Fn(&mut FrgCtx) -> A + 'static, compare_fn: impl Fn(&A, &A) -> bool + 'static) -> Self {
+    pub fn new_with_diff(fgr_ctx: &mut FrgCtx, mut update_fn: impl FnMut(&mut FrgCtx) -> A + 'static, compare_fn: impl FnMut(&A, &A) -> bool + 'static) -> Self {
         let impl_ = Rc::new(RefCell::new(MemoImpl {
             node_data: NodeData {
                 flag: NodeFlag::Ready,
@@ -67,7 +67,7 @@ impl<A: 'static> Memo<A> {
                 dependents: Vec::new(),
             },
             value: None,
-            update_fn: Box::new(update_fn),
+            update_fn: None,
             compare_fn: Box::new(compare_fn),
         }));
         let result = Self {
@@ -75,10 +75,11 @@ impl<A: 'static> Memo<A> {
         };
         let self_ref: NodeRef = (&result).into();
         fgr_ctx.current_observer = Some(self_ref);
+        let value = update_fn(fgr_ctx);
         {
             let mut tmp: RefMut<MemoImpl<A>> = (&*result.impl_).borrow_mut();
-            let value = (tmp.update_fn)(fgr_ctx);
             tmp.value = Some(value);
+            tmp.update_fn = Some(Box::new(update_fn));
         }
         result
     }
@@ -104,8 +105,8 @@ impl<A: 'static> Into<NodeRef> for &Memo<A> {
 pub struct MemoImpl<A> {
     node_data: NodeData,
     value: Option<A>, // <-- only temporarly None during initialization.
-    update_fn: Box<dyn Fn(&mut FrgCtx) -> A>,
-    compare_fn: Box<dyn Fn(&A, &A) -> bool>,
+    update_fn: Option<Box<dyn FnMut(&mut FrgCtx) -> A>>, // <-- only temporarly None during initialization.
+    compare_fn: Box<dyn FnMut(&A, &A) -> bool>,
 }
 
 impl<A> IsNode for MemoImpl<A> {
@@ -118,7 +119,7 @@ impl<A> IsNode for MemoImpl<A> {
     }
 
     fn update(&mut self, fgr_ctx: &mut FrgCtx) -> bool {
-        let next_value = (self.update_fn)(fgr_ctx);
+        let next_value = (self.update_fn.as_mut().unwrap())(fgr_ctx);
         let changed = (self.compare_fn)(&next_value, self.value.as_ref().unwrap());
         self.value = Some(next_value);
         changed

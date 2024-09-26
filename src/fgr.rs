@@ -1,4 +1,3 @@
-use std::borrow::Borrow;
 use std::rc::Rc;
 use std::cell::{Ref, RefCell, RefMut};
 
@@ -12,8 +11,10 @@ macro_rules! cloned {
 }
 
 pub struct FrgCtx {
-    observe_witness: bool,
-    witness: Vec<NodeRef>,
+    witness_created: bool,
+    created_nodes: Vec<NodeRef>,
+    witness_observe: bool,
+    observed_nodes: Vec<NodeRef>,
     stack: Vec<NodeRef>,
     tmp_buffer_1: Vec<NodeRef>,
     tmp_buffer_2: Vec<NodeRef>,
@@ -23,8 +24,10 @@ pub struct FrgCtx {
 impl FrgCtx {
     pub fn new() -> Self {
         Self {
-            observe_witness: false,
-            witness: Vec::new(),
+            witness_created: false,
+            created_nodes: Vec::new(),
+            witness_observe: false,
+            observed_nodes: Vec::new(),
             stack: Vec::new(),
             tmp_buffer_1: Vec::new(),
             tmp_buffer_2: Vec::new(),
@@ -40,6 +43,42 @@ impl FrgCtx {
             update_graph(self);
         }
         result
+    }
+
+    pub fn create_root<R, CALLBACK: FnOnce(&mut Self, RootScope) -> R>(&mut self, callback: CALLBACK) -> R {
+        let scope = RootScope {
+            scope: Rc::new(RefCell::new(Vec::new())),
+        };
+        self.witness_created = true;
+        let result = callback(self, scope.clone());
+        self.witness_created = false;
+        {
+            let mut scope = (*scope.scope).borrow_mut();
+            for node in self.created_nodes.drain(..) {
+                scope.push(node);
+            }
+        }
+        result
+    }
+}
+
+pub struct RootScope {
+    scope: Rc<RefCell<Vec<NodeRef>>>,
+}
+
+impl Clone for RootScope {
+    fn clone(&self) -> Self {
+        Self {
+            scope: Rc::clone(&self.scope),
+        }
+    }
+}
+
+impl RootScope {
+    pub fn dispose(&mut self) {
+        for node in (*self.scope).borrow_mut().drain(..) {
+            (*node.node).borrow_mut().dispose();
+        }
     }
 }
 
@@ -73,6 +112,7 @@ impl<A: 'static> Memo<A> {
                 changed: false,
                 dependencies: Vec::new(),
                 dependents: Vec::new(),
+                scoped: Vec::new(),
             },
             value: None,
             update_fn: None,
@@ -82,10 +122,10 @@ impl<A: 'static> Memo<A> {
             impl_,
         };
         let self_ref: NodeRef = (&result).into();
-        fgr_ctx.observe_witness = true;
+        fgr_ctx.witness_observe = true;
         let value = update_fn(fgr_ctx);
-        fgr_ctx.observe_witness = false;
-        for node in fgr_ctx.witness.drain(..) {
+        fgr_ctx.witness_observe = false;
+        for node in fgr_ctx.observed_nodes.drain(..) {
             node.with_node_mut(|node| {
                 if !node.node_data_mut().dependents.contains(&self_ref) {
                     node.node_data_mut().dependents.push(self_ref.clone());
@@ -108,8 +148,8 @@ impl<A: 'static> Memo<A> {
 
 impl<A: 'static> Memo<A> {
     pub fn value<'a>(&'a self, fgr_ctx: &mut FrgCtx) -> Ref<'_, A> {
-        if fgr_ctx.observe_witness {
-            fgr_ctx.witness.push(self.into());
+        if fgr_ctx.witness_observe {
+            fgr_ctx.observed_nodes.push(self.into());
         }
         let impl_ = (*self.impl_).borrow();
         let val = Ref::map(impl_, |impl_| impl_.value.as_ref().unwrap());
@@ -181,6 +221,7 @@ impl<A> Signal<A> {
                     changed: false,
                     dependencies: Vec::new(),
                     dependents: Vec::new(),
+                    scoped: Vec::new(),
                 },
                 value,
                 value_changed: false,
@@ -247,8 +288,8 @@ impl<A> IsNode for SignalImpl<A> {
 
 impl<A: 'static> Signal<A> {
     pub fn value<'a>(&'a self, fgr_ctx: &mut FrgCtx) -> Ref<'_, A> {
-        if fgr_ctx.observe_witness {
-            fgr_ctx.witness.push(self.into());
+        if fgr_ctx.witness_observe {
+            fgr_ctx.observed_nodes.push(self.into());
         }
         let impl_ = (*self.impl_).borrow();
         let val = Ref::map(impl_, |impl_| &impl_.value);
@@ -284,6 +325,7 @@ struct NodeData {
     changed: bool,
     dependencies: Vec<NodeRef>,
     dependents: Vec<NodeRef>,
+    scoped: Vec<NodeRef>,
 }
 
 trait IsNode {
@@ -325,15 +367,13 @@ impl NodeRef {
     where
         F: FnOnce(&dyn IsNode) -> T,
     {
-        let node: &RefCell<dyn IsNode> = self.node.borrow();
-        f(&*node.borrow())
+        f(&*(*self.node).borrow())
     }
     fn with_node_mut<F, T>(&self, f: F) -> T
     where
         F: FnOnce(&mut dyn IsNode) -> T,
     {
-        let node: &RefCell<dyn IsNode> = self.node.borrow();
-        f(&mut *node.borrow_mut())
+        f(&mut *(*self.node).borrow_mut())
     }
 }
 

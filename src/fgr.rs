@@ -47,6 +47,14 @@ pub struct Memo<A> {
     impl_: Rc<RefCell<MemoImpl<A>>>,
 }
 
+impl<A: 'static> std::fmt::Debug for Memo<A> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("(Memo ")?;
+        Into::<NodeRef>::into(&*self).fmt(f)?;
+        f.write_str(")")
+    }
+}
+
 impl<A: 'static> Memo<A> {
     pub fn new(fgr_ctx: &mut FrgCtx, update_fn: impl FnMut(&mut FrgCtx) -> A + 'static) -> Self
     where A: PartialEq<A>
@@ -175,6 +183,14 @@ impl<A> Signal<A> {
     }
 }
 
+impl<A: 'static> std::fmt::Debug for Signal<A> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("(Signal ")?;
+        Into::<NodeRef>::into(&*self).fmt(f)?;
+        f.write_str(")")
+    }
+}
+
 impl<A> Clone for Signal<A> {
     fn clone(&self) -> Self {
         Self {
@@ -229,6 +245,9 @@ impl<A: 'static> Signal<A> {
     }
 
     pub fn update_value<CALLBACK: FnOnce(&mut A)>(&mut self, fgr_ctx: &mut FrgCtx, callback: CALLBACK) {
+        //
+        println!("Signal::update_value called on {:?}", (Into::<NodeRef>::into(&*self)));
+        //
         fgr_ctx.batch(|fgr_ctx| {
             {
                 let mut impl_ = (*self.impl_).borrow_mut();
@@ -243,7 +262,7 @@ impl<A: 'static> Signal<A> {
     }
 }
 
-#[derive(PartialEq, Eq, Clone, Copy)]
+#[derive(PartialEq, Eq, Clone, Copy, Debug)]
 enum NodeFlag {
     Ready,
     Stale,
@@ -265,6 +284,14 @@ trait IsNode {
 
 pub struct NodeRef {
     node: Rc<RefCell<dyn IsNode>>,
+}
+
+impl std::fmt::Debug for NodeRef {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("(NodeRef ")?;
+        Rc::as_ptr(&self.node).fmt(f)?;
+        f.write_str(")")
+    }
 }
 
 impl PartialEq for NodeRef {
@@ -305,9 +332,16 @@ fn update_graph(fgr_ctx: &mut FrgCtx) {
     std::mem::swap(&mut fgr_ctx.tmp_buffer_1, &mut tmp_buffer_1);
     std::mem::swap(&mut fgr_ctx.tmp_buffer_2, &mut tmp_buffer_2);
     std::mem::swap(&mut fgr_ctx.stack, &mut stack);
+    //
+    println!("update_graph: {} nodes", stack.len());
+    //
     loop {
         let Some(node) = stack.pop() else { break; };
+        //
+        println!("at node {:?}", node);
+        //
         let flag = node.with_node(|n| n.node_data().flag);
+        println!("  flag: {:?}", flag);
         match flag {
             NodeFlag::Ready => { /* do nothing */ },
             NodeFlag::Stale => {
@@ -361,6 +395,9 @@ fn update_graph(fgr_ctx: &mut FrgCtx) {
             n2.changed = false;
         });
     }
+    //
+    println!("update_graph finished.");
+    //
 }
 
 fn propergate_dependents_flags_to_stale(fgr_ctx: &mut FrgCtx) {

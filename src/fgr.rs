@@ -377,6 +377,7 @@ fn update_graph(fgr_ctx: &mut FrgCtx) {
                         let changed = n.update(fgr_ctx);
                         let n2 = n.node_data_mut();
                         n2.changed = changed;
+                        println!("  changed = {}", changed);
                         n2.flag = NodeFlag::Ready;
                         for dep in &n.node_data().dependents {
                             stack.push(dep.clone());

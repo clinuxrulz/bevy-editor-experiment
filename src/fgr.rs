@@ -1,15 +1,6 @@
 use std::rc::Rc;
 use std::cell::{Ref, RefCell, RefMut};
 
-#[macro_export]
-macro_rules! cloned {
-    (($($arg:ident),*) => $e:expr) => {{
-        // clone all the args
-        $( let $arg = ::std::clone::Clone::clone(&$arg); )*
-        $e
-    }};
-}
-
 pub struct FgrCtx {
     witness_created: bool,
     created_nodes: Vec<NodeRef>,
@@ -48,46 +39,60 @@ impl FgrCtx {
     }
 
     pub fn create_root<R, CALLBACK: FnOnce(&mut Self, RootScope) -> R>(&mut self, callback: CALLBACK) -> R {
-        let scope = RootScope {
-            scope: Rc::new(RefCell::new(Vec::new())),
-        };
-        self.witness_created = true;
-        let result = callback(self, scope.clone());
-        self.witness_created = false;
-        {
-            let mut scope = (*scope.scope).borrow_mut();
-            for node in self.created_nodes.drain(..) {
-                scope.push(node);
+        self.batch(|fgr_ctx| {
+            let scope = RootScope {
+                scope: Rc::new(RefCell::new(Vec::new())),
+            };
+            fgr_ctx.witness_created = true;
+            let result = callback(fgr_ctx, scope.clone());
+            fgr_ctx.witness_created = false;
+            {
+                let mut scope = (*scope.scope).borrow_mut();
+                for node in fgr_ctx.created_nodes.drain(..) {
+                    scope.push(node);
+                }
             }
-        }
-        result
+            result
+        })
     }
 
     pub fn create_effect<CALLBACK: FnMut(&mut FgrCtx) + 'static>(&mut self, callback: CALLBACK) {
         if !self.witness_created {
             panic!("Effect created outside of scope. Did you forget to call create_root()?");
         }
-        self.batch(|fgr_ctx| {
-            let impl_ = Rc::new(RefCell::new(EffectImpl {
-                node_data: NodeData {
-                    flag: NodeFlag::Stale,
-                    changed: false,
-                    dependencies: Vec::new(),
-                    dependents: Vec::new(),
-                    scoped: Vec::new(),
-                },
-                effect: Some(Rc::new(RefCell::new(callback))),
-            }));
-            let result = NodeRef {
-                node: impl_,
-            };
-            fgr_ctx.created_nodes.push(result.clone());
-            fgr_ctx.stack.push(result.clone());
-            fgr_ctx.defered_effects.push(Box::new(move |fgr_ctx| {
-                let mut impl_ = (*result.node).borrow_mut();
-                impl_.update(fgr_ctx);
-            }));
-        });
+        let effect: Rc<RefCell<dyn FnMut(&mut FgrCtx)>> = Rc::new(RefCell::new(callback));
+        let impl_: Rc<RefCell<dyn IsNode>> = Rc::new(RefCell::new(EffectImpl {
+            node_data: NodeData {
+                flag: NodeFlag::Stale,
+                changed: false,
+                dependencies: Vec::new(),
+                dependents: Vec::new(),
+                scoped: Vec::new(),
+            },
+            effect: Some(Rc::clone(&effect)),
+        }));
+        let result = NodeRef {
+            node: Rc::clone(&impl_),
+        };
+        self.created_nodes.push(result.clone());
+        self.stack.push(result.clone());
+        self.defered_effects.push(Box::new(move |fgr_ctx| {
+            fgr_ctx.witness_created = true;
+            fgr_ctx.witness_observe = true;
+            (*effect).borrow_mut()(fgr_ctx);
+            fgr_ctx.witness_created = false;
+            fgr_ctx.witness_observe = false;
+            let mut impl_ = impl_.borrow_mut();
+            for node in fgr_ctx.observed_nodes.drain(..) {
+                impl_.node_data_mut().dependencies.push(node.clone());
+                node.with_node_mut(|node| {
+                    node.node_data_mut().dependents.push(result.clone());
+                });
+            }
+            for node in fgr_ctx.created_nodes.drain(..) {
+                impl_.node_data_mut().scoped.push(node.clone());
+            }
+        }));
     }
 }
 
@@ -605,4 +610,13 @@ fn propergate_dependents_flags_to_stale(fgr_ctx: &mut FgrCtx) {
     for dep in fgr_ctx.tmp_buffer_2.drain(..) {
         fgr_ctx.stack.push(dep);
     }
+}
+
+#[macro_export]
+macro_rules! cloned {
+    (($($arg:ident),*) => $e:expr) => {{
+        // clone all the args
+        $( let $arg = ::std::clone::Clone::clone(&$arg); )*
+        $e
+    }};
 }

@@ -74,6 +74,7 @@ impl<A: 'static> Memo<A> {
         let self_ref: NodeRef = (&result).into();
         fgr_ctx.current_observer = Some(self_ref);
         let value = update_fn(fgr_ctx);
+        fgr_ctx.current_observer = None;
         {
             let mut tmp: RefMut<MemoImpl<A>> = (&*result.impl_).borrow_mut();
             tmp.value = Some(value);
@@ -108,6 +109,10 @@ pub struct MemoImpl<A> {
 }
 
 impl<A> IsNode for MemoImpl<A> {
+    fn is_source(&self) -> bool {
+        false
+    }
+
     fn node_data(&self) -> &NodeData {
         &self.node_data
     }
@@ -169,6 +174,10 @@ struct SignalImpl<A> {
 }
 
 impl<A> IsNode for SignalImpl<A> {
+    fn is_source(&self) -> bool {
+        true
+    }
+
     fn node_data(&self) -> &NodeData {
         &self.node_data
     }
@@ -210,12 +219,11 @@ impl<A: 'static> Signal<A> {
                 let mut impl_ = (*self.impl_).borrow_mut();
                 callback(&mut impl_.value);
                 impl_.value_changed = true;
+                impl_.node_data.flag = NodeFlag::Stale;
             }
             // add self to stack for propergating dependent flags to stale.
             fgr_ctx.stack.push((&*self).into());
             propergate_dependents_flags_to_stale(fgr_ctx);
-            // add self to stack (again) for starting point to track updates.
-            fgr_ctx.stack.push((&*self).into());
         });
     }
 }
@@ -234,6 +242,7 @@ struct NodeData {
 }
 
 trait IsNode {
+    fn is_source(&self) -> bool;
     fn node_data(&self) -> &NodeData;
     fn node_data_mut(&mut self) -> &mut NodeData;
     fn update(&mut self, fgr_ctx: &mut FrgCtx) -> bool;
@@ -287,12 +296,13 @@ fn update_graph(fgr_ctx: &mut FrgCtx) {
         match flag {
             NodeFlag::Ready => { /* do nothing */ },
             NodeFlag::Stale => {
+                let is_source = node.with_node(|n| n.is_source());
                 node.with_node(|n| {
                     for dep in &n.node_data().dependencies {
                         tmp_buffer_2.push(dep.clone());
                     }
                 });
-                let mut any_depdencies_changed = false;
+                let mut any_dependencies_changed = false;
                 let mut has_stale_dependencies = false;
                 for dep in &*tmp_buffer_2 {
                     let flag = dep.with_node(|n| n.node_data().flag);
@@ -300,7 +310,7 @@ fn update_graph(fgr_ctx: &mut FrgCtx) {
                         NodeFlag::Ready => {
                             let changed = dep.with_node(|n| n.node_data().changed);
                             if changed {
-                                any_depdencies_changed = true;
+                                any_dependencies_changed = true;
                                 break;
                             }
                         },
@@ -312,7 +322,7 @@ fn update_graph(fgr_ctx: &mut FrgCtx) {
                     }
                 }
                 tmp_buffer_2.clear();
-                if !has_stale_dependencies && any_depdencies_changed {
+                if !has_stale_dependencies && (any_dependencies_changed || is_source) {
                     let changed = node.with_node_mut(|n| {
                         let changed = n.update(fgr_ctx);
                         let n2 = n.node_data_mut();
@@ -344,11 +354,15 @@ fn propergate_dependents_flags_to_stale(fgr_ctx: &mut FrgCtx) {
         at.with_node(|n| {
             for dep in &n.node_data().dependents {
                 fgr_ctx.tmp_buffer_1.push(dep.clone());
+                fgr_ctx.tmp_buffer_2.push(dep.clone());
             }
         });
         for dep in fgr_ctx.tmp_buffer_1.drain(..) {
             dep.with_node_mut(|n| n.node_data_mut().flag = NodeFlag::Stale);
             fgr_ctx.stack.push(dep);
         }
+    }
+    for dep in fgr_ctx.tmp_buffer_2.drain(..) {
+        fgr_ctx.stack.push(dep);
     }
 }

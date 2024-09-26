@@ -145,6 +145,7 @@ impl<A: 'static> Memo<A> {
             tmp.value = Some(value);
             tmp.update_fn = Some(Box::new(update_fn));
         }
+        fgr_ctx.created_nodes.push(self_ref);
         result
     }
 }
@@ -205,6 +206,9 @@ impl<A> IsNode for MemoImpl<A> {
     }
 
     fn dispose(&mut self) {
+        //
+        println!("dispose node {:?}", self as *const dyn IsNode);
+        //
         let self2: *const dyn IsNode = self;
         for dependency in self.node_data.dependencies.drain(..) {
             dependency.with_node_mut(|node| {
@@ -298,25 +302,7 @@ impl<A> IsNode for SignalImpl<A> {
         result
     }
 
-    fn dispose(&mut self) {
-        let self2: *const dyn IsNode = self;
-        for dependency in self.node_data.dependencies.drain(..) {
-            dependency.with_node_mut(|node| {
-                node.node_data_mut().dependents.retain(|x| {
-                    let x2 = x.node.as_ptr() as *const dyn IsNode;
-                    return std::ptr::addr_eq(self2, x2);
-                });
-            });
-        }
-        for dependent in self.node_data.dependents.drain(..) {
-            dependent.with_node_mut(|node| {
-                node.node_data_mut().dependencies.retain(|x| {
-                    let x2 = x.node.as_ptr() as *const dyn IsNode;
-                    return std::ptr::addr_eq(self2, x2);
-                });
-            });
-        }
-    }
+    fn dispose(&mut self) { /* do nothing */}
 }
 
 impl<A: 'static> Signal<A> {

@@ -106,6 +106,9 @@ impl<A: 'static> Memo<A> {
     }
 
     pub fn new_with_diff(fgr_ctx: &mut FrgCtx, mut update_fn: impl FnMut(&mut FrgCtx) -> A + 'static, compare_fn: impl FnMut(&A, &A) -> bool + 'static) -> Self {
+        if !fgr_ctx.witness_created {
+            panic!("Memo created outside of scope. Did you forget to call create_root()?");
+        }
         let impl_ = Rc::new(RefCell::new(MemoImpl {
             node_data: NodeData {
                 flag: NodeFlag::Ready,
@@ -202,8 +205,23 @@ impl<A> IsNode for MemoImpl<A> {
     }
 
     fn dispose(&mut self) {
-        self.node_data.dependencies.clear();
-        self.node_data.dependents.clear();
+        let self2: *const dyn IsNode = self;
+        for dependency in self.node_data.dependencies.drain(..) {
+            dependency.with_node_mut(|node| {
+                node.node_data_mut().dependents.retain(|x| {
+                    let x2 = x.node.as_ptr() as *const dyn IsNode;
+                    return std::ptr::addr_eq(self2, x2);
+                });
+            });
+        }
+        for dependent in self.node_data.dependents.drain(..) {
+            dependent.with_node_mut(|node| {
+                node.node_data_mut().dependencies.retain(|x| {
+                    let x2 = x.node.as_ptr() as *const dyn IsNode;
+                    return std::ptr::addr_eq(self2, x2);
+                });
+            });
+        }
         self.update_fn = None;
     }
 }
@@ -281,8 +299,23 @@ impl<A> IsNode for SignalImpl<A> {
     }
 
     fn dispose(&mut self) {
-        self.node_data.dependencies.clear();
-        self.node_data.dependents.clear();
+        let self2: *const dyn IsNode = self;
+        for dependency in self.node_data.dependencies.drain(..) {
+            dependency.with_node_mut(|node| {
+                node.node_data_mut().dependents.retain(|x| {
+                    let x2 = x.node.as_ptr() as *const dyn IsNode;
+                    return std::ptr::addr_eq(self2, x2);
+                });
+            });
+        }
+        for dependent in self.node_data.dependents.drain(..) {
+            dependent.with_node_mut(|node| {
+                node.node_data_mut().dependencies.retain(|x| {
+                    let x2 = x.node.as_ptr() as *const dyn IsNode;
+                    return std::ptr::addr_eq(self2, x2);
+                });
+            });
+        }
     }
 }
 

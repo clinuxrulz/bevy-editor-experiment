@@ -12,7 +12,8 @@ macro_rules! cloned {
 }
 
 pub struct FrgCtx {
-    current_observer: Option<NodeRef>,
+    observe_witness: bool,
+    witness: Vec<NodeRef>,
     stack: Vec<NodeRef>,
     tmp_buffer_1: Vec<NodeRef>,
     tmp_buffer_2: Vec<NodeRef>,
@@ -22,7 +23,8 @@ pub struct FrgCtx {
 impl FrgCtx {
     pub fn new() -> Self {
         Self {
-            current_observer: None,
+            observe_witness: false,
+            witness: Vec::new(),
             stack: Vec::new(),
             tmp_buffer_1: Vec::new(),
             tmp_buffer_2: Vec::new(),
@@ -72,15 +74,38 @@ impl<A: 'static> Memo<A> {
             impl_,
         };
         let self_ref: NodeRef = (&result).into();
-        fgr_ctx.current_observer = Some(self_ref);
+        fgr_ctx.observe_witness = true;
         let value = update_fn(fgr_ctx);
-        fgr_ctx.current_observer = None;
+        fgr_ctx.observe_witness = false;
+        for node in fgr_ctx.witness.drain(..) {
+            node.with_node_mut(|node| {
+                if !node.node_data_mut().dependents.contains(&self_ref) {
+                    node.node_data_mut().dependents.push(self_ref.clone());
+                }
+            });
+            self_ref.with_node_mut(|self_node| {
+                if !self_node.node_data_mut().dependencies.contains(&node) {
+                    self_node.node_data_mut().dependencies.push(node.clone());
+                }
+            });
+        }
         {
             let mut tmp: RefMut<MemoImpl<A>> = (&*result.impl_).borrow_mut();
             tmp.value = Some(value);
             tmp.update_fn = Some(Box::new(update_fn));
         }
         result
+    }
+}
+
+impl<A: 'static> Memo<A> {
+    pub fn value<'a>(&'a self, fgr_ctx: &mut FrgCtx) -> Ref<'_, A> {
+        if fgr_ctx.observe_witness {
+            fgr_ctx.witness.push(self.into());
+        }
+        let impl_ = (*self.impl_).borrow();
+        let val = Ref::map(impl_, |impl_| impl_.value.as_ref().unwrap());
+        val
     }
 }
 
@@ -195,18 +220,8 @@ impl<A> IsNode for SignalImpl<A> {
 
 impl<A: 'static> Signal<A> {
     pub fn value<'a>(&'a self, fgr_ctx: &mut FrgCtx) -> Ref<'_, A> {
-        if let Some(observer_node) = fgr_ctx.current_observer.as_mut() {
-            let self_ref: NodeRef = self.into();
-            observer_node.with_node_mut(|node| {
-                if !node.node_data_mut().dependencies.contains(&self_ref) {
-                    node.node_data_mut().dependencies.push(self_ref.clone());
-                }
-            });
-            self_ref.with_node_mut(|node| {
-                if !node.node_data_mut().dependents.contains(&observer_node) {
-                    node.node_data_mut().dependents.push(observer_node.clone());
-                }
-            });
+        if fgr_ctx.observe_witness {
+            fgr_ctx.witness.push(self.into());
         }
         let impl_ = (*self.impl_).borrow();
         let val = Ref::map(impl_, |impl_| &impl_.value);

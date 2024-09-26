@@ -2,7 +2,7 @@ use crate::{cloned, fgr::*};
 
 #[test]
 fn test_fgr() {
-    let mut fgr_ctx = FrgCtx::new();
+    let mut fgr_ctx = FgrCtx::new();
     let fgr_ctx = &mut fgr_ctx;
     let mut sa = Signal::new(fgr_ctx, 1);
     //

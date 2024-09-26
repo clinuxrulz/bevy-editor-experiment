@@ -10,7 +10,7 @@ macro_rules! cloned {
     }};
 }
 
-pub struct FrgCtx {
+pub struct FgrCtx {
     witness_created: bool,
     created_nodes: Vec<NodeRef>,
     witness_observe: bool,
@@ -21,7 +21,7 @@ pub struct FrgCtx {
     transaction_level: u32,
 }
 
-impl FrgCtx {
+impl FgrCtx {
     pub fn new() -> Self {
         Self {
             witness_created: false,
@@ -95,17 +95,17 @@ impl<A: 'static> std::fmt::Debug for Memo<A> {
 }
 
 impl<A: 'static> Memo<A> {
-    pub fn new(fgr_ctx: &mut FrgCtx, update_fn: impl FnMut(&mut FrgCtx) -> A + 'static) -> Self
+    pub fn new(fgr_ctx: &mut FgrCtx, update_fn: impl FnMut(&mut FgrCtx) -> A + 'static) -> Self
     where A: PartialEq<A>
     {
         Self::new_with_diff(fgr_ctx, update_fn, |a, b| a == b)        
     }
 
-    pub fn new_no_diff(fgr_ctx: &mut FrgCtx, update_fn: impl FnMut(&mut FrgCtx) -> A + 'static) -> Self {
+    pub fn new_no_diff(fgr_ctx: &mut FgrCtx, update_fn: impl FnMut(&mut FgrCtx) -> A + 'static) -> Self {
         Self::new_with_diff(fgr_ctx, update_fn, |_a, _b| false)
     }
 
-    pub fn new_with_diff(fgr_ctx: &mut FrgCtx, mut update_fn: impl FnMut(&mut FrgCtx) -> A + 'static, compare_fn: impl FnMut(&A, &A) -> bool + 'static) -> Self {
+    pub fn new_with_diff(fgr_ctx: &mut FgrCtx, mut update_fn: impl FnMut(&mut FgrCtx) -> A + 'static, compare_fn: impl FnMut(&A, &A) -> bool + 'static) -> Self {
         if !fgr_ctx.witness_created {
             panic!("Memo created outside of scope. Did you forget to call create_root()?");
         }
@@ -151,7 +151,7 @@ impl<A: 'static> Memo<A> {
 }
 
 impl<A: 'static> Memo<A> {
-    pub fn value<'a>(&'a self, fgr_ctx: &mut FrgCtx) -> Ref<'_, A> {
+    pub fn value<'a>(&'a self, fgr_ctx: &mut FgrCtx) -> Ref<'_, A> {
         if fgr_ctx.witness_observe {
             fgr_ctx.observed_nodes.push(self.into());
         }
@@ -181,7 +181,7 @@ impl<A: 'static> Into<NodeRef> for &Memo<A> {
 pub struct MemoImpl<A> {
     node_data: NodeData,
     value: Option<A>, // <-- only temporarly None during initialization.
-    update_fn: Option<Box<dyn FnMut(&mut FrgCtx) -> A>>, // <-- only temporarly None during initialization.
+    update_fn: Option<Box<dyn FnMut(&mut FgrCtx) -> A>>, // <-- only temporarly None during initialization.
     compare_fn: Box<dyn FnMut(&A, &A) -> bool>,
 }
 
@@ -198,7 +198,7 @@ impl<A> IsNode for MemoImpl<A> {
         &mut self.node_data
     }
 
-    fn update(&mut self, fgr_ctx: &mut FrgCtx) -> bool {
+    fn update(&mut self, fgr_ctx: &mut FgrCtx) -> bool {
         let next_value = (self.update_fn.as_mut().unwrap())(fgr_ctx);
         let changed = !(self.compare_fn)(&next_value, self.value.as_ref().unwrap());
         self.value = Some(next_value);
@@ -240,7 +240,7 @@ pub struct Signal<A> {
 }
 
 impl<A> Signal<A> {
-    pub fn new(_fgr_ctx: &mut FrgCtx, value: A) -> Self {
+    pub fn new(_fgr_ctx: &mut FgrCtx, value: A) -> Self {
         Self {
             impl_: Rc::new(RefCell::new(SignalImpl {
                 node_data: NodeData {
@@ -301,7 +301,7 @@ impl<A> IsNode for SignalImpl<A> {
         &mut self.node_data
     }
 
-    fn update(&mut self, _fgr_ctx: &mut FrgCtx) -> bool {
+    fn update(&mut self, _fgr_ctx: &mut FgrCtx) -> bool {
         let result = self.value_changed;
         self.value_changed = false;
         result
@@ -311,7 +311,7 @@ impl<A> IsNode for SignalImpl<A> {
 }
 
 impl<A: 'static> Signal<A> {
-    pub fn value<'a>(&'a self, fgr_ctx: &mut FrgCtx) -> Ref<'_, A> {
+    pub fn value<'a>(&'a self, fgr_ctx: &mut FgrCtx) -> Ref<'_, A> {
         if fgr_ctx.witness_observe {
             fgr_ctx.observed_nodes.push(self.into());
         }
@@ -320,7 +320,7 @@ impl<A: 'static> Signal<A> {
         val
     }
 
-    pub fn update_value<CALLBACK: FnOnce(&mut A)>(&mut self, fgr_ctx: &mut FrgCtx, callback: CALLBACK) {
+    pub fn update_value<CALLBACK: FnOnce(&mut A)>(&mut self, fgr_ctx: &mut FgrCtx, callback: CALLBACK) {
         //
         println!("Signal::update_value called on {:?}", (Into::<NodeRef>::into(&*self)));
         //
@@ -356,7 +356,7 @@ trait IsNode {
     fn is_source(&self) -> bool;
     fn node_data(&self) -> &NodeData;
     fn node_data_mut(&mut self) -> &mut NodeData;
-    fn update(&mut self, fgr_ctx: &mut FrgCtx) -> bool;
+    fn update(&mut self, fgr_ctx: &mut FgrCtx) -> bool;
     fn dispose(&mut self);
 }
 
@@ -401,7 +401,7 @@ impl NodeRef {
     }
 }
 
-fn update_graph(fgr_ctx: &mut FrgCtx) {
+fn update_graph(fgr_ctx: &mut FgrCtx) {
     let mut tmp_buffer_1 = Vec::new();
     let mut tmp_buffer_2 = Vec::new();
     let mut stack = Vec::new();
@@ -510,7 +510,7 @@ fn update_graph(fgr_ctx: &mut FrgCtx) {
     //
 }
 
-fn propergate_dependents_flags_to_stale(fgr_ctx: &mut FrgCtx) {
+fn propergate_dependents_flags_to_stale(fgr_ctx: &mut FgrCtx) {
     loop {
         let Some(at) = fgr_ctx.stack.pop() else { break; };
         at.with_node(|n| {

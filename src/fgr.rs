@@ -362,7 +362,7 @@ pub struct NodeRef {
 impl std::fmt::Debug for NodeRef {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("(NodeRef ")?;
-        Rc::as_ptr(&self.node).fmt(f)?;
+        RefCell::as_ptr(&self.node).fmt(f)?;
         f.write_str(")")
     }
 }

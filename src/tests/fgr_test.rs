@@ -25,6 +25,10 @@ fn test_fgr() {
         //
         println!("memo_b node: {:?}", memo_b);
         //
+        fgr_ctx.create_effect(cloned!((memo_a, memo_b) => move |fgr_ctx| {
+            println!("effect (memo_a * memo_b): {}", *memo_a.value(fgr_ctx) * *memo_b.value(fgr_ctx));
+        }));
+        //
         scope
     });
     sa.update_value(fgr_ctx, |v| *v += 1);

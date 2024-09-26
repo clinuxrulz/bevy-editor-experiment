@@ -19,6 +19,7 @@ pub struct FgrCtx {
     tmp_buffer_1: Vec<NodeRef>,
     tmp_buffer_2: Vec<NodeRef>,
     transaction_level: u32,
+    defered_effects: Vec<Box<dyn FnOnce(&mut FgrCtx)>>,
 }
 
 impl FgrCtx {
@@ -32,6 +33,7 @@ impl FgrCtx {
             tmp_buffer_1: Vec::new(),
             tmp_buffer_2: Vec::new(),
             transaction_level: 0,
+            defered_effects: Vec::new(),
         }
     }
 
@@ -60,6 +62,33 @@ impl FgrCtx {
         }
         result
     }
+
+    pub fn create_effect<CALLBACK: FnMut(&mut FgrCtx) + 'static>(&mut self, callback: CALLBACK) {
+        if !self.witness_created {
+            panic!("Effect created outside of scope. Did you forget to call create_root()?");
+        }
+        self.batch(|fgr_ctx| {
+            let impl_ = Rc::new(RefCell::new(EffectImpl {
+                node_data: NodeData {
+                    flag: NodeFlag::Stale,
+                    changed: false,
+                    dependencies: Vec::new(),
+                    dependents: Vec::new(),
+                    scoped: Vec::new(),
+                },
+                effect: Some(Rc::new(RefCell::new(callback))),
+            }));
+            let result = NodeRef {
+                node: impl_,
+            };
+            fgr_ctx.created_nodes.push(result.clone());
+            fgr_ctx.stack.push(result.clone());
+            fgr_ctx.defered_effects.push(Box::new(move |fgr_ctx| {
+                let mut impl_ = (*result.node).borrow_mut();
+                impl_.update(fgr_ctx);
+            }));
+        });
+    }
 }
 
 pub struct RootScope {
@@ -79,6 +108,50 @@ impl RootScope {
         for node in (*self.scope).borrow_mut().drain(..) {
             (*node.node).borrow_mut().dispose();
         }
+    }
+}
+
+pub struct EffectImpl {
+    node_data: NodeData,
+    effect: Option<Rc<RefCell<dyn FnMut(&mut FgrCtx)>>>,
+}
+
+impl IsNode for EffectImpl {
+    fn is_source(&self) -> bool {
+        false
+    }
+
+    fn node_data(&self) -> &NodeData {
+        &self.node_data
+    }
+
+    fn node_data_mut(&mut self) -> &mut NodeData {
+        &mut self.node_data
+    }
+
+    fn update(&mut self, fgr_ctx: &mut FgrCtx) -> bool {
+        let Some(effect) = self.effect.as_ref() else { return false; };
+        let effect = Rc::clone(effect);
+        fgr_ctx.defered_effects.push(Box::new(move |fgr_ctx| {
+            effect.borrow_mut()(fgr_ctx);
+        }));
+        false
+    }
+
+    fn dispose(&mut self) {
+        //
+        println!("dispose node {:?}", self as *const dyn IsNode);
+        //
+        let self2: *const dyn IsNode = self;
+        for dependency in self.node_data.dependencies.drain(..) {
+            dependency.with_node_mut(|node| {
+                node.node_data_mut().dependents.retain(|x| {
+                    let x2 = x.node.as_ptr() as *const dyn IsNode;
+                    return std::ptr::addr_eq(self2, x2);
+                });
+            });
+        }
+        self.effect = None;
     }
 }
 
@@ -508,6 +581,11 @@ fn update_graph(fgr_ctx: &mut FgrCtx) {
     //
     println!("update_graph finished.");
     //
+    let mut deferred_effects = Vec::new();
+    std::mem::swap(&mut fgr_ctx.defered_effects, &mut deferred_effects);
+    for effect in deferred_effects {
+        effect(fgr_ctx);
+    }
 }
 
 fn propergate_dependents_flags_to_stale(fgr_ctx: &mut FgrCtx) {

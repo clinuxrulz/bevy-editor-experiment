@@ -156,7 +156,7 @@ impl<A> IsNode for MemoImpl<A> {
 
     fn update(&mut self, fgr_ctx: &mut FrgCtx) -> bool {
         let next_value = (self.update_fn.as_mut().unwrap())(fgr_ctx);
-        let changed = (self.compare_fn)(&next_value, self.value.as_ref().unwrap());
+        let changed = !(self.compare_fn)(&next_value, self.value.as_ref().unwrap());
         self.value = Some(next_value);
         changed
     }

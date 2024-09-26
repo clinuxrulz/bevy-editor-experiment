@@ -160,6 +160,12 @@ impl<A> IsNode for MemoImpl<A> {
         self.value = Some(next_value);
         changed
     }
+
+    fn dispose(&mut self) {
+        self.node_data.dependencies.clear();
+        self.node_data.dependents.clear();
+        self.update_fn = None;
+    }
 }
 
 pub struct Signal<A> {
@@ -232,6 +238,11 @@ impl<A> IsNode for SignalImpl<A> {
         self.value_changed = false;
         result
     }
+
+    fn dispose(&mut self) {
+        self.node_data.dependencies.clear();
+        self.node_data.dependents.clear();
+    }
 }
 
 impl<A: 'static> Signal<A> {
@@ -280,6 +291,7 @@ trait IsNode {
     fn node_data(&self) -> &NodeData;
     fn node_data_mut(&mut self) -> &mut NodeData;
     fn update(&mut self, fgr_ctx: &mut FrgCtx) -> bool;
+    fn dispose(&mut self);
 }
 
 pub struct NodeRef {

@@ -1,6 +1,8 @@
 use std::rc::Rc;
 use std::cell::{Ref, RefCell, RefMut};
 
+use bevy::core_pipeline::deferred::node;
+
 #[macro_export]
 macro_rules! cloned {
     (($($arg:ident),*) => $e:expr) => {{
@@ -115,11 +117,11 @@ impl<A: 'static> Memo<A> {
                 changed: false,
                 dependencies: Vec::new(),
                 dependents: Vec::new(),
-                scoped: Vec::new(),
             },
             value: None,
             update_fn: None,
             compare_fn: Box::new(compare_fn),
+            scoped: Vec::new(),
         }));
         let result = Self {
             impl_,
@@ -183,6 +185,7 @@ pub struct MemoImpl<A> {
     value: Option<A>, // <-- only temporarly None during initialization.
     update_fn: Option<Box<dyn FnMut(&mut FrgCtx) -> A>>, // <-- only temporarly None during initialization.
     compare_fn: Box<dyn FnMut(&A, &A) -> bool>,
+    scoped: Vec<NodeRef>,
 }
 
 impl<A> IsNode for MemoImpl<A> {
@@ -227,6 +230,11 @@ impl<A> IsNode for MemoImpl<A> {
             });
         }
         self.update_fn = None;
+        for node in self.scoped.drain(..) {
+            node.with_node_mut(|node| {
+                node.dispose();
+            });
+        }
     }
 }
 
@@ -243,7 +251,6 @@ impl<A> Signal<A> {
                     changed: false,
                     dependencies: Vec::new(),
                     dependents: Vec::new(),
-                    scoped: Vec::new(),
                 },
                 value,
                 value_changed: false,
@@ -344,7 +351,6 @@ struct NodeData {
     changed: bool,
     dependencies: Vec<NodeRef>,
     dependents: Vec<NodeRef>,
-    scoped: Vec<NodeRef>,
 }
 
 trait IsNode {

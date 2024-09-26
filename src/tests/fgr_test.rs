@@ -22,7 +22,7 @@ fn test_fgr() {
         next
     }));
     //
-    println!("memo_b node: {:?}", memo_a);
+    println!("memo_b node: {:?}", memo_b);
     //
     sa.update_value(fgr_ctx, |v| *v += 1);
 }

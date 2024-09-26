@@ -372,6 +372,7 @@ fn update_graph(fgr_ctx: &mut FrgCtx) {
                 }
                 tmp_buffer_2.clear();
                 if !has_stale_dependencies && (any_dependencies_changed || is_source) {
+                    println!("  update node {:?}", node);
                     let changed = node.with_node_mut(|n| {
                         let changed = n.update(fgr_ctx);
                         let n2 = n.node_data_mut();

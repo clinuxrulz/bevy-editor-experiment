@@ -450,7 +450,39 @@ fn update_graph(fgr_ctx: &mut FrgCtx) {
                 if !has_stale_dependencies && (any_dependencies_changed || is_source) {
                     println!("  update node {:?}", node);
                     let changed = node.with_node_mut(|n| {
+                        if !is_source {
+                            fgr_ctx.witness_created = true;
+                            fgr_ctx.witness_observe = true;
+                            for scoped in n.node_data_mut().scoped.drain(..) {
+                                (*scoped.node).borrow_mut().dispose();
+                            }
+                        }
                         let changed = n.update(fgr_ctx);
+                        if !is_source {
+                            fgr_ctx.witness_observe = false;
+                            fgr_ctx.witness_created = false;
+                            let mut dependencies_to_remove: Vec<NodeRef> = Vec::new();
+                            let mut dependencies_to_add: Vec<NodeRef> = Vec::new();
+                            for dep in &fgr_ctx.observed_nodes {
+                                let has = n.node_data().dependencies.contains(dep);
+                                if !has {
+                                    dependencies_to_add.push(dep.clone());
+                                }
+                            }
+                            for dep in &n.node_data().dependencies {
+                                let has = fgr_ctx.observed_nodes.contains(dep);
+                                if !has {
+                                    dependencies_to_remove.push(dep.clone());
+                                }
+                            }
+                            for dep in dependencies_to_remove {
+                                n.node_data_mut().dependencies.retain(|x| *x != dep);
+                            }
+                            for dep in dependencies_to_add {
+                                n.node_data_mut().dependencies.push(dep);
+                            }
+                            std::mem::swap(&mut n.node_data_mut().scoped, &mut fgr_ctx.created_nodes);
+                        }
                         let n2 = n.node_data_mut();
                         n2.changed = changed;
                         println!("  changed = {}", changed);

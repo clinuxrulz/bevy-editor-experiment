@@ -32,5 +32,5 @@ fn test_fgr() {
         scope
     });
     sa.update_value(fgr_ctx, |v| *v += 1);
-    scope.dispose();
+    //scope.dispose();
 }

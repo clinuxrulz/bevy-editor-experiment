@@ -15,11 +15,12 @@ pub use ui_component::UiComponentMount;
 use crate::cloned;
 use crate::fgr::FgrCtx;
 
-pub fn render<'a, R: UiComponentMount + Sync + Send + 'static, CALLBACK: FnOnce() -> R>(app: &mut App, callback: CALLBACK) {
-    let mount = callback();
+pub fn render<'a, R: UiComponentMount + Sync + Send + 'static, CALLBACK: FnOnce(&mut FgrCtx) -> R>(app: &mut App, callback: CALLBACK) {
+    let mut fgr_ctx = FgrCtx::new();
+    let mount = callback(&mut fgr_ctx);
     let mount = Arc::new(Mutex::new(mount));
     app
-        .insert_resource(FgrCtx::new())
+        .insert_resource(fgr_ctx)
         .add_systems(
             Startup,
             cloned!((mount) => move |world: &mut World| {

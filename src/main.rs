@@ -14,7 +14,7 @@ fn main() {
         .add_systems(Startup, setup);
     ui::render(
         &mut app,
-        || {
+        |fgr_ctx| {
             ui::Checkbox::execute(())
         }
     );

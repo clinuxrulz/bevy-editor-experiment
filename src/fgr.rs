@@ -1,6 +1,6 @@
 use std::sync::{Arc, RwLock, RwLockReadGuard};
 
-use bevy::prelude::Resource;
+use bevy::prelude::{Resource, World};
 
 #[derive(Resource)]
 pub struct FgrCtx {
@@ -13,6 +13,16 @@ pub struct FgrCtx {
     tmp_buffer_2: Vec<NodeRef>,
     transaction_level: u32,
     defered_effects: Vec<Box<dyn FnOnce(&mut FgrCtx) + Sync + Send>>,
+}
+
+pub trait WithFgrCtx {
+    fn with_fgr_ctx<R, CALLBACK: FnOnce(&mut FgrCtx) -> R>(self, callback: CALLBACK) -> R;
+}
+
+impl WithFgrCtx for &mut World {
+    fn with_fgr_ctx<R, CALLBACK: FnOnce(&mut FgrCtx) -> R>(self, callback: CALLBACK) -> R {
+        callback(&mut *self.get_resource_mut::<FgrCtx>().unwrap())
+    }
 }
 
 impl FgrCtx {

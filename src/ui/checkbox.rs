@@ -1,11 +1,25 @@
 use bevy::{color::{palettes::css::RED, Color}, prelude::{ButtonBundle, Entity, World}, ui::{BackgroundColor, BorderRadius, Interaction, Style, Val}};
 
+use crate::fgr::{FgrCtx, Memo};
+
 use super::{ui_component::UiComponentMount, UiComponent};
 
 pub struct Checkbox;
 
-impl UiComponent<()> for Checkbox {
-    fn execute(_props: ()) -> impl UiComponentMount {
+pub struct CheckboxProps {
+    pub on_changed: Option<Box<dyn FnMut(&mut FgrCtx, bool)>>,
+}
+
+impl Default for CheckboxProps {
+    fn default() -> Self {
+        Self {
+            on_changed: Default::default(),
+        }
+    }
+}
+
+impl UiComponent<CheckboxProps> for Checkbox {
+    fn execute(props: CheckboxProps) -> impl UiComponentMount {
         struct CheckboxMount {
             checkbox_entity: Option<Entity>,
             last_interaction: Interaction,

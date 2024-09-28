@@ -667,7 +667,7 @@ fn propergate_dependents_flags_to_stale(fgr_ctx: &mut FgrCtx) {
 macro_rules! cloned {
     (($($arg:ident),*) => $e:expr) => {{
         // clone all the args
-        $( let $arg = ::std::clone::Clone::clone(&$arg); )*
+        $( let mut $arg = ::std::clone::Clone::clone(&$arg); )*
         $e
     }};
 }

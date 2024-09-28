@@ -654,6 +654,7 @@ fn propergate_dependents_flags_to_stale(fgr_ctx: &mut FgrCtx) {
             }
         });
         for dep in fgr_ctx.tmp_buffer_1.drain(..) {
+            println!("  dep: {:?} marked stale", dep);
             dep.with_node_mut(|n| n.node_data_mut().flag = NodeFlag::Stale);
             fgr_ctx.stack.push(dep);
         }

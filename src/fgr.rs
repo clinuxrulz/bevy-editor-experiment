@@ -4,6 +4,7 @@ use bevy::prelude::{Resource, World};
 
 #[derive(Resource)]
 pub struct FgrCtx {
+    next_id: u64,
     witness_created: bool,
     created_nodes: Vec<NodeRef>,
     witness_observe: bool,
@@ -26,8 +27,15 @@ impl WithFgrCtx for &mut World {
 }
 
 impl FgrCtx {
+    fn alloc_id(&mut self) -> u64 {
+        let id = self.next_id;
+        self.next_id += 1;
+        id
+    }
+
     pub fn new() -> Self {
         Self {
+            next_id: 0,
             witness_created: false,
             created_nodes: Vec::new(),
             witness_observe: false,
@@ -72,9 +80,11 @@ impl FgrCtx {
         if !self.witness_created {
             panic!("Effect created outside of scope. Did you forget to call create_root()?");
         }
+        let id = self.alloc_id();
         let effect: Arc<RwLock<dyn FnMut(&mut FgrCtx) + Send + Sync>> = Arc::new(RwLock::new(callback));
         let impl_: Arc<RwLock<dyn IsNode + Send + Sync>> = Arc::new(RwLock::new(EffectImpl {
             node_data: NodeData {
+                id,
                 flag: NodeFlag::Stale,
                 changed: false,
                 dependencies: Vec::new(),
@@ -83,13 +93,9 @@ impl FgrCtx {
             },
             effect: Some(Arc::clone(&effect)),
         }));
-        let address: u64;
-        {
-            address = &*impl_.read().unwrap() as *const dyn IsNode as *const u8 as u64;
-        }
         let result = NodeRef {
+            id,
             node: Arc::clone(&impl_),
-            address,
         };
         self.created_nodes.push(result.clone());
         self.stack.push(result.clone());
@@ -166,12 +172,10 @@ impl IsNode for EffectImpl {
         //
         println!("dispose node {:?}", self as *const dyn IsNode);
         //
-        let self2: *const dyn IsNode = self;
         for dependency in self.node_data.dependencies.drain(..) {
             dependency.with_node_mut(|node| {
                 node.node_data_mut().dependents.retain(|x| {
-                    let x2 = x.address;
-                    return self2 as *const u8 as u64 != x2;
+                    return x.id != self.node_data.id;
                 });
             });
         }
@@ -185,9 +189,7 @@ pub struct Memo<A> {
 
 impl<A: Send + Sync + 'static> std::fmt::Debug for Memo<A> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("(Memo ")?;
-        Into::<NodeRef>::into(&*self).fmt(f)?;
-        f.write_str(")")
+        write!(f, "(Memo {})", Into::<NodeRef>::into(self).id)
     }
 }
 
@@ -206,8 +208,10 @@ impl<A: Send + Sync + 'static> Memo<A> {
         if !fgr_ctx.witness_created {
             panic!("Memo created outside of scope. Did you forget to call create_root()?");
         }
+        let id = fgr_ctx.alloc_id();
         let impl_ = Arc::new(RwLock::new(MemoImpl {
             node_data: NodeData {
+                id,
                 flag: NodeFlag::Ready,
                 changed: false,
                 dependencies: Vec::new(),
@@ -277,14 +281,11 @@ impl<A> Clone for Memo<A> {
 
 impl<A: Send + Sync + 'static> Into<NodeRef> for &Memo<A> {
     fn into(self) -> NodeRef {
+        let id = self.impl_.read().unwrap().node_data.id;
         let node = Arc::clone(&self.impl_);
-        let address: u64;
-        {
-            address = &*self.impl_.read().unwrap() as *const dyn IsNode as *const u8 as u64;
-        }
         NodeRef {
+            id,
             node,
-            address,
         }
     }
 }
@@ -320,20 +321,17 @@ impl<A> IsNode for MemoImpl<A> {
         //
         println!("dispose node {:?}", self as *const dyn IsNode);
         //
-        let self2: *const dyn IsNode = self;
         for dependency in self.node_data.dependencies.drain(..) {
             dependency.with_node_mut(|node| {
                 node.node_data_mut().dependents.retain(|x| {
-                    let x2 = x.address;
-                    return self2 as *const u8 as u64 != x2;
+                    return x.id != self.node_data.id;
                 });
             });
         }
         for dependent in self.node_data.dependents.drain(..) {
             dependent.with_node_mut(|node| {
                 node.node_data_mut().dependencies.retain(|x| {
-                    let x2 = x.address;
-                    return self2 as *const u8 as u64 != x2;
+                    return x.id != self.node_data.id;
                 });
             });
         }
@@ -351,10 +349,12 @@ pub struct Signal<A> {
 }
 
 impl<A> Signal<A> {
-    pub fn new(_fgr_ctx: &mut FgrCtx, value: A) -> Self {
+    pub fn new(fgr_ctx: &mut FgrCtx, value: A) -> Self {
+        let id = fgr_ctx.alloc_id();
         Self {
             impl_: Arc::new(RwLock::new(SignalImpl {
                 node_data: NodeData {
+                    id,
                     flag: NodeFlag::Ready,
                     changed: false,
                     dependencies: Vec::new(),
@@ -368,12 +368,9 @@ impl<A> Signal<A> {
     }
 }
 
-impl<A: 'static> std::fmt::Debug for Signal<A> {
+impl<A: Send + Sync + 'static> std::fmt::Debug for Signal<A> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("(Signal ")?;
-        let tmp = &*self.impl_.read().unwrap() as *const dyn IsNode;
-        write!(f, " {:p}", tmp)?;
-        f.write_str(")")
+        write!(f, "(Signal {})", Into::<NodeRef>::into(self).id)
     }
 }
 
@@ -387,14 +384,11 @@ impl<A> Clone for Signal<A> {
 
 impl<A: Send + Sync + 'static> Into<NodeRef> for &Signal<A> {
     fn into(self) -> NodeRef {
+        let id = self.impl_.read().unwrap().node_data.id;
         let node = Arc::clone(&self.impl_);
-        let address: u64;
-        {
-            address = &*self.impl_.read().unwrap() as *const dyn IsNode as *const u8 as u64;
-        }
         NodeRef {
+            id,
             node,
-            address,
         }
     }
 }
@@ -471,6 +465,7 @@ enum NodeFlag {
 }
 
 struct NodeData {
+    id: u64,
     flag: NodeFlag,
     changed: bool,
     dependencies: Vec<NodeRef>,
@@ -487,16 +482,13 @@ trait IsNode {
 }
 
 pub struct NodeRef {
+    id: u64,
     node: Arc<RwLock<dyn IsNode + Send + Sync>>,
-    address: u64,
 }
 
 impl std::fmt::Debug for NodeRef {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("(NodeRef ")?;
-        let node = &*self.node.read().unwrap() as *const dyn IsNode;
-        write!(f, " {:p}", node)?;
-        f.write_str(")")
+        write!(f, "(Node Ref {})", self.id)
     }
 }
 
@@ -509,8 +501,8 @@ impl PartialEq for NodeRef {
 impl Clone for NodeRef {
     fn clone(&self) -> Self {
         Self {
+            id: self.id,
             node: Arc::clone(&self.node),
-            address: self.address,
         }
     }
 }
@@ -668,7 +660,10 @@ fn propergate_dependents_flags_to_stale(fgr_ctx: &mut FgrCtx) {
 macro_rules! cloned {
     (($($arg:ident),*) => $e:expr) => {{
         // clone all the args
-        $( let mut $arg = ::std::clone::Clone::clone(&$arg); )*
+        $(
+            #[allow(unused_mut)]
+            let mut $arg = ::std::clone::Clone::clone(&$arg);
+        )*
         $e
     }};
 }

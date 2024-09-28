@@ -1,5 +1,5 @@
 use bevy::{prelude::*, winit::WinitSettings};
-use fgr::{FgrCtx, Memo, Signal};
+use fgr::{FgrCtx, Memo, Signal, WithFgrCtx};
 use ui::UiComponent;
 
 pub mod fgr;
@@ -22,8 +22,10 @@ fn main() {
             }));
             ui::Checkbox::execute(
                 ui::CheckboxProps {
-                    on_changed: Some(Box::new(cloned!((checked) => move |fgr_ctx, value| {
-                        checked.update_value(fgr_ctx, |old_value| *old_value = value);
+                    on_changed: Some(Box::new(cloned!((checked) => move |world, value| {
+                        world.with_fgr_ctx(|fgr_ctx| {
+                            checked.update_value(fgr_ctx, |old_value| *old_value = value);
+                        });
                     }))),
                 },
             )

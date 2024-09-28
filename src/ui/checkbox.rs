@@ -7,7 +7,7 @@ use super::{ui_component::UiComponentMount, UiComponent};
 pub struct Checkbox;
 
 pub struct CheckboxProps {
-    pub on_changed: Option<Box<dyn FnMut(&mut FgrCtx, bool) + Send + Sync>>,
+    pub on_changed: Option<Box<dyn FnMut(&mut World, bool) + Send + Sync>>,
 }
 
 impl Default for CheckboxProps {
@@ -60,9 +60,7 @@ impl UiComponent<CheckboxProps> for Checkbox {
                         .unwrap()
                         .0 = if self.checked { RED.into() } else { Color::BLACK };
                     if let Some(on_changed) = &mut self.props.on_changed {
-                        world.with_fgr_ctx(|fgr_ctx| {
-                            on_changed(fgr_ctx, self.checked);
-                        });
+                        on_changed(world, self.checked);
                     }
                 }
             }

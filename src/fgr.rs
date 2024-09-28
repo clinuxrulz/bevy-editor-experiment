@@ -1,4 +1,4 @@
-use std::{borrow::BorrowMut, sync::{Arc, RwLock, RwLockReadGuard}};
+use std::sync::{Arc, RwLock, RwLockReadGuard};
 
 use bevy::prelude::Resource;
 
@@ -73,8 +73,13 @@ impl FgrCtx {
             },
             effect: Some(Arc::clone(&effect)),
         }));
+        let address: u64;
+        {
+            address = &*impl_.read().unwrap() as *const dyn IsNode as *const u8 as u64;
+        }
         let result = NodeRef {
             node: Arc::clone(&impl_),
+            address,
         };
         self.created_nodes.push(result.clone());
         self.stack.push(result.clone());
@@ -155,8 +160,8 @@ impl IsNode for EffectImpl {
         for dependency in self.node_data.dependencies.drain(..) {
             dependency.with_node_mut(|node| {
                 node.node_data_mut().dependents.retain(|x| {
-                    let x2 = &*x.node.read().unwrap() as *const dyn IsNode;
-                    return std::ptr::addr_eq(self2, x2);
+                    let x2 = x.address;
+                    return self2 as *const u8 as u64 != x2;
                 });
             });
         }
@@ -263,8 +268,13 @@ impl<A> Clone for Memo<A> {
 impl<A: Send + Sync + 'static> Into<NodeRef> for &Memo<A> {
     fn into(self) -> NodeRef {
         let node = Arc::clone(&self.impl_);
+        let address: u64;
+        {
+            address = &*self.impl_.read().unwrap() as *const dyn IsNode as *const u8 as u64;
+        }
         NodeRef {
             node,
+            address,
         }
     }
 }
@@ -304,16 +314,16 @@ impl<A> IsNode for MemoImpl<A> {
         for dependency in self.node_data.dependencies.drain(..) {
             dependency.with_node_mut(|node| {
                 node.node_data_mut().dependents.retain(|x| {
-                    let x2 = &*x.node.read().unwrap() as *const dyn IsNode;
-                    return std::ptr::addr_eq(self2, x2);
+                    let x2 = x.address;
+                    return self2 as *const u8 as u64 != x2;
                 });
             });
         }
         for dependent in self.node_data.dependents.drain(..) {
             dependent.with_node_mut(|node| {
                 node.node_data_mut().dependencies.retain(|x| {
-                    let x2 = &*x.node.read().unwrap() as *const dyn IsNode;
-                    return std::ptr::addr_eq(self2, x2);
+                    let x2 = x.address;
+                    return self2 as *const u8 as u64 != x2;
                 });
             });
         }
@@ -368,8 +378,13 @@ impl<A> Clone for Signal<A> {
 impl<A: Send + Sync + 'static> Into<NodeRef> for &Signal<A> {
     fn into(self) -> NodeRef {
         let node = Arc::clone(&self.impl_);
+        let address: u64;
+        {
+            address = &*self.impl_.read().unwrap() as *const dyn IsNode as *const u8 as u64;
+        }
         NodeRef {
             node,
+            address,
         }
     }
 }
@@ -463,6 +478,7 @@ trait IsNode {
 
 pub struct NodeRef {
     node: Arc<RwLock<dyn IsNode + Send + Sync>>,
+    address: u64,
 }
 
 impl std::fmt::Debug for NodeRef {
@@ -484,6 +500,7 @@ impl Clone for NodeRef {
     fn clone(&self) -> Self {
         Self {
             node: Arc::clone(&self.node),
+            address: self.address,
         }
     }
 }

@@ -9,6 +9,7 @@ impl UiComponent<()> for Checkbox {
         struct CheckboxMount {
             checkbox_entity: Option<Entity>,
             last_interaction: Interaction,
+            checked: bool,
         }
         impl UiComponentMount for CheckboxMount {
             fn init(&mut self, world: &mut World) {
@@ -37,16 +38,12 @@ impl UiComponent<()> for Checkbox {
                     return;
                 }
                 self.last_interaction = *interaction;
-                if *interaction == Interaction::None {
+                if *interaction == Interaction::Pressed {
+                    self.checked = !self.checked;
                     world
                         .get_mut::<BackgroundColor>(entity)
                         .unwrap()
-                        .0 = Color::BLACK;
-                } else {
-                    world
-                        .get_mut::<BackgroundColor>(entity)
-                        .unwrap()
-                        .0 = RED.into();
+                        .0 = if self.checked { RED.into() } else { Color::BLACK };
                 }
             }
             fn dispose(&mut self, world: &mut World) {
@@ -57,6 +54,7 @@ impl UiComponent<()> for Checkbox {
         CheckboxMount {
             checkbox_entity: None,
             last_interaction: Interaction::None,
+            checked: false,
         }
     }
 }

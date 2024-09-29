@@ -45,5 +45,5 @@ fn test_fgr() {
     print_graph((&sa).into());
     //
     sa.update_value(ctx, |v| *v += 1);
-    scope.dispose();
+    scope.dispose(ctx);
 }

@@ -1,7 +1,5 @@
 use bevy::prelude::World;
 
-use crate::fgr::FgrCtx;
-
 pub trait UiComponentMount {
     fn init(&mut self, world: &mut World);
     fn update(&mut self, world: &mut World);

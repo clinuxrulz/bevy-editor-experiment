@@ -32,7 +32,7 @@ fn main() {
         }
     );
     app.run();
-    scope.dispose();
+    scope.dispose(app.world_mut());
 }
 
 fn setup(mut commands: Commands) {

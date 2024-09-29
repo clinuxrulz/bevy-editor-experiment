@@ -30,6 +30,7 @@ pub trait FgrExtensionMethods {
     fn fgr_batch<R, CALLBACK: FnOnce(&mut Self) -> R>(&mut self, callback: CALLBACK) -> R;
     fn fgr_create_root<R, CALLBACK: FnOnce(&mut Self, RootScope<Self>) -> R>(&mut self, callback: CALLBACK) -> R;
     fn fgr_create_effect<CALLBACK: FnMut(&mut Self) + Send + Sync + 'static>(&mut self, callback: CALLBACK);
+    fn fgr_on_cleanup<CALLBACK: FnMut(&mut Self) + Send + Sync + 'static>(&mut self, callback: CALLBACK);
 }
 
 impl<CTX: HasFgrCtx + 'static> FgrExtensionMethods for CTX {
@@ -43,6 +44,10 @@ impl<CTX: HasFgrCtx + 'static> FgrExtensionMethods for CTX {
 
     fn fgr_create_effect<CALLBACK: FnMut(&mut Self) + Send + Sync + 'static>(&mut self, callback: CALLBACK) {
         FgrCtx::create_effect(self, callback)
+    }
+
+    fn fgr_on_cleanup<CALLBACK: FnMut(&mut Self) + Send + Sync + 'static>(&mut self, callback: CALLBACK) {
+        FgrCtx::on_cleanup(self, callback)
     }
 }
 
@@ -145,6 +150,29 @@ impl<CTX: HasFgrCtx + 'static> FgrCtx<CTX> {
             }
         }));
     }
+
+    pub fn on_cleanup(ctx: &mut CTX, callback: impl FnMut(&mut CTX) + Send + Sync + 'static) {
+        if !ctx.fgr_ctx().witness_created {
+            panic!("on_cleanup created outside of scope. Did you forget to call create_root()?");
+        }
+        let id = ctx.fgr_ctx().alloc_id();
+        let impl_: Arc<RwLock<dyn IsNode<CTX> + Send + Sync>> = Arc::new(RwLock::new(CleanupImpl {
+            node_data: NodeData {
+                id,
+                flag: NodeFlag::Stale,
+                changed: false,
+                dependencies: Vec::new(),
+                dependents: Vec::new(),
+                scoped: Vec::new(),
+            },
+            cleanup: Some(Arc::new(RwLock::new(callback))),
+        }));
+        let node = NodeRef {
+            id,
+            node: Arc::clone(&impl_),
+        };
+        ctx.fgr_ctx().created_nodes.push(node.clone());
+    }
 }
 
 pub struct RootScope<CTX> {
@@ -160,11 +188,44 @@ impl<CTX> Clone for RootScope<CTX> {
 }
 
 impl<CTX: HasFgrCtx> RootScope<CTX> {
-    pub fn dispose(&mut self) {
+    pub fn dispose(&mut self, ctx: &mut CTX) {
         let mut scope: Vec<NodeRef<CTX>> = Vec::new();
         std::mem::swap(&mut *(*self.scope).write().unwrap(), &mut scope);
         for node in scope {
-            (*node.node).write().unwrap().dispose();
+            (*node.node).write().unwrap().dispose(ctx);
+        }
+    }
+}
+
+pub struct CleanupImpl<CTX> {
+    node_data: NodeData<CTX>,
+    cleanup: Option<Arc<RwLock<dyn FnMut(&mut CTX) + Send + Sync>>>,
+}
+
+impl<CTX: HasFgrCtx + 'static> IsNode<CTX> for CleanupImpl<CTX> {
+    fn is_source(&self) -> bool {
+        false
+    }
+
+    fn is_sink(&self) -> bool {
+        false
+    }
+
+    fn node_data(&self) -> &NodeData<CTX> {
+        &self.node_data
+    }
+
+    fn node_data_mut(&mut self) -> &mut NodeData<CTX> {
+        &mut self.node_data
+    }
+
+    fn update(&mut self, _self_node_ref: NodeRef<CTX>, _ctx: &mut CTX) -> bool {
+        false
+    }
+
+    fn dispose(&mut self, ctx: &mut CTX) {
+        if let Some(cleanup) = self.cleanup.as_ref() {
+            (*cleanup).write().unwrap()(ctx);
         }
     }
 }
@@ -229,7 +290,7 @@ impl<CTX: HasFgrCtx + 'static> IsNode<CTX> for EffectImpl<CTX> {
         false
     }
 
-    fn dispose(&mut self) {
+    fn dispose(&mut self, _ctx: &mut CTX) {
         //
         println!("dispose node {:}", self.node_data.id);
         //
@@ -382,7 +443,7 @@ impl<CTX: HasFgrCtx, A> IsNode<CTX> for MemoImpl<CTX,A> {
         changed
     }
 
-    fn dispose(&mut self) {
+    fn dispose(&mut self, ctx: &mut CTX) {
         //
         println!("dispose node {}", self.node_data.id);
         //
@@ -403,7 +464,7 @@ impl<CTX: HasFgrCtx, A> IsNode<CTX> for MemoImpl<CTX,A> {
         self.update_fn = None;
         for node in self.node_data.scoped.drain(..) {
             node.with_node_mut(|node| {
-                node.dispose();
+                node.dispose(ctx);
             });
         }
     }
@@ -487,7 +548,7 @@ impl<CTX: HasFgrCtx + 'static, A> IsNode<CTX> for SignalImpl<CTX, A> {
         result
     }
 
-    fn dispose(&mut self) { /* do nothing */}
+    fn dispose(&mut self, _ctx: &mut CTX) { /* do nothing */}
 }
 
 impl<CTX: HasFgrCtx + 'static, A: Send + Sync + 'static> Signal<CTX, A> {
@@ -548,7 +609,7 @@ trait IsNode<CTX: HasFgrCtx> {
     fn node_data(&self) -> &NodeData<CTX>;
     fn node_data_mut(&mut self) -> &mut NodeData<CTX>;
     fn update(&mut self, self_node_ref: NodeRef<CTX>, ctx: &mut CTX) -> bool;
-    fn dispose(&mut self);
+    fn dispose(&mut self, ctx: &mut CTX);
 }
 
 pub struct NodeRef<CTX> {
@@ -647,7 +708,7 @@ fn update_graph<CTX: HasFgrCtx>(ctx: &mut CTX) {
                             ctx.fgr_ctx().witness_created = true;
                             ctx.fgr_ctx().witness_observe = true;
                             for scoped in n.node_data_mut().scoped.drain(..) {
-                                (*scoped.node).write().unwrap().dispose();
+                                (*scoped.node).write().unwrap().dispose(ctx);
                             }
                         }
                         let changed = n.update(node2, ctx);

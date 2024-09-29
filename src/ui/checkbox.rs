@@ -1,8 +1,10 @@
+use std::sync::{Arc, RwLock};
+
 use bevy::{color::{palettes::css::RED, Color}, prelude::{ButtonBundle, Entity, World}, ui::{BackgroundColor, BorderRadius, Interaction, Style, Val}};
 
-use crate::fgr::FgrExtensionMethods;
+use crate::{cloned, fgr::FgrExtensionMethods};
 
-use super::{ui_component::UiComponentMount, UiComponent};
+use super::UiComponent;
 
 pub struct Checkbox;
 
@@ -19,61 +21,58 @@ impl Default for CheckboxProps {
 }
 
 impl UiComponent<CheckboxProps> for Checkbox {
-    fn execute(props: CheckboxProps) -> impl UiComponentMount {
+    fn execute(world: &mut World, props: CheckboxProps) -> Box<dyn FnMut(&mut World) + Send + Sync> {
         struct CheckboxMount {
             props: CheckboxProps,
-            checkbox_entity: Option<Entity>,
+            checkbox_entity: Entity,
             last_interaction: Interaction,
             checked: bool,
         }
-        impl UiComponentMount for CheckboxMount {
-            fn init(&mut self, world: &mut World) {
-                self.checkbox_entity = Some(
-                    world
-                        .spawn(
-                            ButtonBundle {
-                                style: Style {
-                                    width: Val::Px(10.0),
-                                    height: Val::Px(10.0),
-                                    ..Default::default()
-                                },
-                                border_color: Color::WHITE.into(),
-                                border_radius: BorderRadius::all(Val::Px(5.0)),
-                                background_color: Color::BLACK.into(),
-                                ..Default::default()
-                            }
-                        )
-                        .id()
-                );
-            }
-            fn update(&mut self, world: &mut World) {
-                let Some(entity) = self.checkbox_entity else { return; };
-                let Some(interaction) = world.get::<Interaction>(entity) else { return; };
-                if *interaction == self.last_interaction {
-                    return;
+        let checkbox_entity = world
+            .spawn(
+                ButtonBundle {
+                    style: Style {
+                        width: Val::Px(10.0),
+                        height: Val::Px(10.0),
+                        ..Default::default()
+                    },
+                    border_color: Color::WHITE.into(),
+                    border_radius: BorderRadius::all(Val::Px(5.0)),
+                    background_color: Color::BLACK.into(),
+                    ..Default::default()
                 }
-                self.last_interaction = *interaction;
-                if *interaction == Interaction::Pressed {
-                    self.checked = !self.checked;
-                    world
-                        .get_mut::<BackgroundColor>(entity)
-                        .unwrap()
-                        .0 = if self.checked { RED.into() } else { Color::BLACK };
-                    if let Some(on_changed) = &mut self.props.on_changed {
-                        on_changed(world, self.checked);
-                    }
+            )
+            .id();
+        let mount: Arc<RwLock<CheckboxMount>> = Arc::new(RwLock::new(
+            CheckboxMount {
+                props,
+                checkbox_entity,
+                last_interaction: Interaction::None,
+                checked: false,
+            }
+        ));
+        world.fgr_on_cleanup(cloned!((mount) => move |world| {
+            world.despawn(mount.read().unwrap().checkbox_entity);
+        }));
+        let update: Box<dyn FnMut(&mut World) + Send + Sync> = Box::new(cloned!((mount) => move |world| {
+            let mount = &mut *mount.write().unwrap();
+            let entity = mount.checkbox_entity;
+            let Some(interaction) = world.get::<Interaction>(entity) else { return; };
+            if *interaction == mount.last_interaction {
+                return;
+            }
+            mount.last_interaction = *interaction;
+            if *interaction == Interaction::Pressed {
+                mount.checked = !mount.checked;
+                world
+                    .get_mut::<BackgroundColor>(entity)
+                    .unwrap()
+                    .0 = if mount.checked { RED.into() } else { Color::BLACK };
+                if let Some(on_changed) = &mut mount.props.on_changed {
+                    on_changed(world, mount.checked);
                 }
             }
-            fn dispose(&mut self, world: &mut World) {
-                let Some(entity) = self.checkbox_entity else { return; };
-                world.despawn(entity);
-            }
-        }
-        CheckboxMount {
-            props,
-            checkbox_entity: None,
-            last_interaction: Interaction::None,
-            checked: false,
-        }
+        }));
+        update
     }
 }

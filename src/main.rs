@@ -22,6 +22,7 @@ fn main() {
             }));
             print_graph((&checked).into());
             ui::Checkbox::execute(
+                world,
                 ui::CheckboxProps {
                     on_changed: Some(Box::new(cloned!((checked) => move |world, value| {
                         checked.update_value(world, |old_value| *old_value = value);

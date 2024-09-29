@@ -31,6 +31,9 @@ fn test_fgr() {
         //
         scope
     });
+    //
+    print_graph((&sa).into());
+    //
     sa.update_value(fgr_ctx, |v| *v += 1);
     scope.dispose();
 }

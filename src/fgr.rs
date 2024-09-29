@@ -1,6 +1,6 @@
 use std::sync::{Arc, RwLock, RwLockReadGuard};
 
-use bevy::prelude::{Resource, World};
+use bevy::{core_pipeline::deferred::node, prelude::{Resource, World}};
 
 #[derive(Resource)]
 pub struct FgrCtx {
@@ -654,6 +654,23 @@ fn propergate_dependents_flags_to_stale(fgr_ctx: &mut FgrCtx) {
     for dep in fgr_ctx.tmp_buffer_2.drain(..) {
         fgr_ctx.stack.push(dep);
     }
+}
+
+pub fn print_graph(node: NodeRef) {
+    println!("-- Graph Start --");
+    let mut stack = vec![node];
+    while let Some(node) = stack.pop() {
+        println!("  at node {:?}", node);
+        node.with_node(|n| {
+            println!("    dependencies: {:?}", n.node_data().dependencies);
+            println!("    dependents: {:?}", n.node_data().dependents);
+            println!("    scoped: {:?}", n.node_data().scoped);
+            for dep in &n.node_data().dependents {
+                stack.push(dep.clone());
+            }
+        });
+    }
+    println!("-- Graph End --");
 }
 
 #[macro_export]

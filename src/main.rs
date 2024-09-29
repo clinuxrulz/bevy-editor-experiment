@@ -1,5 +1,5 @@
 use bevy::{prelude::*, winit::WinitSettings};
-use fgr::{print_graph, FgrCtx, Memo, Signal, WithFgrCtx};
+use fgr::{print_graph, FgrCtx, HasFgrCtx, Memo, Signal};
 use ui::UiComponent;
 
 pub mod fgr;
@@ -24,10 +24,9 @@ fn main() {
             ui::Checkbox::execute(
                 ui::CheckboxProps {
                     on_changed: Some(Box::new(cloned!((checked) => move |world, value| {
-                        world.with_fgr_ctx(|fgr_ctx| {
-                            checked.update_value(fgr_ctx, |old_value| *old_value = value);
-                            print_graph((&checked).into());
-                        });
+                        let fgr_ctx = &mut world.fgr_ctx();
+                        checked.update_value(fgr_ctx, |old_value| *old_value = value);
+                        print_graph((&checked).into());
                     }))),
                 },
             )

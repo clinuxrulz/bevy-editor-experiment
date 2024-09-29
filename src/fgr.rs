@@ -1,4 +1,4 @@
-use std::sync::{Arc, RwLock, RwLockReadGuard};
+use std::{ops::DerefMut, sync::{Arc, RwLock, RwLockReadGuard}};
 
 use bevy::prelude::{Resource, World};
 
@@ -16,13 +16,13 @@ pub struct FgrCtx {
     defered_effects: Vec<Box<dyn FnOnce(&mut FgrCtx) + Sync + Send>>,
 }
 
-pub trait WithFgrCtx {
-    fn with_fgr_ctx<R, CALLBACK: FnOnce(&mut FgrCtx) -> R>(self, callback: CALLBACK) -> R;
+pub trait HasFgrCtx {
+    fn fgr_ctx<'a>(&'a mut self) -> impl DerefMut<Target=FgrCtx> + 'a;
 }
 
-impl WithFgrCtx for &mut World {
-    fn with_fgr_ctx<R, CALLBACK: FnOnce(&mut FgrCtx) -> R>(self, callback: CALLBACK) -> R {
-        callback(&mut *self.get_resource_mut::<FgrCtx>().unwrap())
+impl HasFgrCtx for World {
+    fn fgr_ctx<'a>(&'a mut self) -> impl DerefMut<Target=FgrCtx> + 'a {
+        self.get_resource_mut::<FgrCtx>().unwrap()
     }
 }
 

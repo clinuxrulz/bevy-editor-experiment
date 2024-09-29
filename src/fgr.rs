@@ -1,6 +1,6 @@
 use std::sync::{Arc, RwLock, RwLockReadGuard};
 
-use bevy::{core_pipeline::deferred::node, prelude::{Resource, World}};
+use bevy::prelude::{Resource, World};
 
 #[derive(Resource)]
 pub struct FgrCtx {

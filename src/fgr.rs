@@ -151,6 +151,10 @@ impl IsNode for EffectImpl {
         false
     }
 
+    fn is_sink(&self) -> bool {
+        true
+    }
+
     fn node_data(&self) -> &NodeData {
         &self.node_data
     }
@@ -159,11 +163,40 @@ impl IsNode for EffectImpl {
         &mut self.node_data
     }
 
-    fn update(&mut self, fgr_ctx: &mut FgrCtx) -> bool {
+    fn update(&mut self, self_node_ref: NodeRef, fgr_ctx: &mut FgrCtx) -> bool {
         let Some(effect) = self.effect.as_ref() else { return false; };
         let effect = Arc::clone(effect);
         fgr_ctx.defered_effects.push(Box::new(move |fgr_ctx| {
+            fgr_ctx.witness_observe = true;
+            fgr_ctx.witness_created = true;
             effect.write().unwrap()(fgr_ctx);
+            fgr_ctx.witness_observe = false;
+            fgr_ctx.witness_created = false;
+            let mut dependencies_to_remove: Vec<NodeRef> = Vec::new();
+            let mut dependencies_to_add: Vec<NodeRef> = Vec::new();
+            for dep in &fgr_ctx.observed_nodes {
+                let has = self_node_ref.with_node(|self_node| self_node.node_data().dependencies.contains(dep));
+                if !has {
+                    dependencies_to_add.push(dep.clone());
+                }
+            }
+            self_node_ref.with_node(|self_node| {
+                for dep in &self_node.node_data().dependencies {
+                    let has = fgr_ctx.observed_nodes.contains(dep);
+                    if !has {
+                        dependencies_to_remove.push(dep.clone());
+                    }
+                }
+            });
+            for dep in dependencies_to_remove {
+                self_node_ref.with_node_mut(|self_node| self_node.node_data_mut().dependencies.retain(|x| *x != dep));
+            }
+            for dep in dependencies_to_add {
+                self_node_ref.with_node_mut(|self_node| self_node.node_data_mut().dependencies.push(dep));
+            }
+            self_node_ref.with_node_mut(|self_node| {
+                std::mem::swap(&mut self_node.node_data_mut().scoped, &mut fgr_ctx.created_nodes);
+            });
         }));
         false
     }
@@ -302,6 +335,10 @@ impl<A> IsNode for MemoImpl<A> {
         false
     }
 
+    fn is_sink(&self) -> bool {
+        false
+    }
+
     fn node_data(&self) -> &NodeData {
         &self.node_data
     }
@@ -310,7 +347,7 @@ impl<A> IsNode for MemoImpl<A> {
         &mut self.node_data
     }
 
-    fn update(&mut self, fgr_ctx: &mut FgrCtx) -> bool {
+    fn update(&mut self, _self_node_ref: NodeRef, fgr_ctx: &mut FgrCtx) -> bool {
         let next_value = (self.update_fn.as_mut().unwrap())(fgr_ctx);
         let changed = !(self.compare_fn)(&next_value, self.value.as_ref().unwrap());
         self.value = Some(next_value);
@@ -404,6 +441,10 @@ impl<A> IsNode for SignalImpl<A> {
         true
     }
 
+    fn is_sink(&self) -> bool {
+        false
+    }
+
     fn node_data(&self) -> &NodeData {
         &self.node_data
     }
@@ -412,7 +453,7 @@ impl<A> IsNode for SignalImpl<A> {
         &mut self.node_data
     }
 
-    fn update(&mut self, _fgr_ctx: &mut FgrCtx) -> bool {
+    fn update(&mut self, _self_node_ref: NodeRef, _fgr_ctx: &mut FgrCtx) -> bool {
         let result = self.value_changed;
         self.value_changed = false;
         result
@@ -475,9 +516,10 @@ struct NodeData {
 
 trait IsNode {
     fn is_source(&self) -> bool;
+    fn is_sink(&self) -> bool;
     fn node_data(&self) -> &NodeData;
     fn node_data_mut(&mut self) -> &mut NodeData;
-    fn update(&mut self, fgr_ctx: &mut FgrCtx) -> bool;
+    fn update(&mut self, self_node_ref: NodeRef, fgr_ctx: &mut FgrCtx) -> bool;
     fn dispose(&mut self);
 }
 
@@ -543,6 +585,7 @@ fn update_graph(fgr_ctx: &mut FgrCtx) {
             NodeFlag::Ready => { /* do nothing */ },
             NodeFlag::Stale => {
                 let is_source = node.with_node(|n| n.is_source());
+                let is_sink = node.with_node(|n| n.is_sink());
                 node.with_node(|n| {
                     for dep in &n.node_data().dependencies {
                         tmp_buffer_2.push(dep.clone());
@@ -570,16 +613,17 @@ fn update_graph(fgr_ctx: &mut FgrCtx) {
                 tmp_buffer_2.clear();
                 if !has_stale_dependencies && (any_dependencies_changed || is_source) {
                     println!("  update node {:?}", node);
+                    let node2 = node.clone();
                     let changed = node.with_node_mut(|n| {
-                        if !is_source {
+                        if !(is_source || is_sink) {
                             fgr_ctx.witness_created = true;
                             fgr_ctx.witness_observe = true;
                             for scoped in n.node_data_mut().scoped.drain(..) {
                                 (*scoped.node).write().unwrap().dispose();
                             }
                         }
-                        let changed = n.update(fgr_ctx);
-                        if !is_source {
+                        let changed = n.update(node2, fgr_ctx);
+                        if !(is_source || is_sink) {
                             fgr_ctx.witness_observe = false;
                             fgr_ctx.witness_created = false;
                             let mut dependencies_to_remove: Vec<NodeRef> = Vec::new();

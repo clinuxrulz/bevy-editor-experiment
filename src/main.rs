@@ -1,5 +1,5 @@
 use bevy::{prelude::*, winit::WinitSettings};
-use fgr::{print_graph, FgrCtx, HasFgrCtx, Memo, Signal};
+use fgr::{print_graph, Signal, FgrExtensionMethods};
 use ui::UiComponent;
 
 pub mod fgr;
@@ -15,17 +15,16 @@ fn main() {
         .add_systems(Startup, setup);
     let mut scope = ui::render(
         &mut app,
-        |fgr_ctx| {
-            let checked = Signal::new(fgr_ctx, false);
-            fgr_ctx.create_effect(cloned!((checked) => move |fgr_ctx| {
-                println!("checked = {}", *checked.value(fgr_ctx));
+        |world| {
+            let checked = Signal::new(world, false);
+            world.fgr_create_effect(cloned!((checked) => move |world| {
+                println!("checked = {}", *checked.value(world));
             }));
             print_graph((&checked).into());
             ui::Checkbox::execute(
                 ui::CheckboxProps {
                     on_changed: Some(Box::new(cloned!((checked) => move |world, value| {
-                        let fgr_ctx = &mut world.fgr_ctx();
-                        checked.update_value(fgr_ctx, |old_value| *old_value = value);
+                        checked.update_value(world, |old_value| *old_value = value);
                         print_graph((&checked).into());
                     }))),
                 },

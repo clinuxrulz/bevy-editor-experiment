@@ -3,30 +3,50 @@ use std::{ops::DerefMut, sync::{Arc, RwLock, RwLockReadGuard}};
 use bevy::prelude::{Resource, World};
 
 #[derive(Resource)]
-pub struct FgrCtx {
+pub struct FgrCtx<CTX> {
     next_id: u64,
     witness_created: bool,
-    created_nodes: Vec<NodeRef>,
+    created_nodes: Vec<NodeRef<CTX>>,
     witness_observe: bool,
-    observed_nodes: Vec<NodeRef>,
-    stack: Vec<NodeRef>,
-    tmp_buffer_1: Vec<NodeRef>,
-    tmp_buffer_2: Vec<NodeRef>,
+    observed_nodes: Vec<NodeRef<CTX>>,
+    stack: Vec<NodeRef<CTX>>,
+    tmp_buffer_1: Vec<NodeRef<CTX>>,
+    tmp_buffer_2: Vec<NodeRef<CTX>>,
     transaction_level: u32,
-    defered_effects: Vec<Box<dyn FnOnce(&mut FgrCtx) + Sync + Send>>,
+    defered_effects: Vec<Box<dyn FnOnce(&mut CTX) + Sync + Send>>,
 }
 
-pub trait HasFgrCtx {
-    fn fgr_ctx<'a>(&'a mut self) -> impl DerefMut<Target=FgrCtx> + 'a;
+pub trait HasFgrCtx where Self: Sized {
+    fn fgr_ctx<'a>(&'a mut self) -> impl DerefMut<Target=FgrCtx<Self>> + 'a;
 }
 
 impl HasFgrCtx for World {
-    fn fgr_ctx<'a>(&'a mut self) -> impl DerefMut<Target=FgrCtx> + 'a {
-        self.get_resource_mut::<FgrCtx>().unwrap()
+    fn fgr_ctx<'a>(&'a mut self) -> impl DerefMut<Target=FgrCtx<Self>> + 'a {
+        self.get_resource_mut::<FgrCtx<Self>>().unwrap()
     }
 }
 
-impl FgrCtx {
+pub trait FgrExtensionMethods {
+    fn fgr_batch<R, CALLBACK: FnOnce(&mut Self) -> R>(&mut self, callback: CALLBACK) -> R;
+    fn fgr_create_root<R, CALLBACK: FnOnce(&mut Self, RootScope<Self>) -> R>(&mut self, callback: CALLBACK) -> R;
+    fn fgr_create_effect<CALLBACK: FnMut(&mut Self) + Send + Sync + 'static>(&mut self, callback: CALLBACK);
+}
+
+impl<CTX: HasFgrCtx + 'static> FgrExtensionMethods for CTX {
+    fn fgr_batch<R, CALLBACK: FnOnce(&mut Self) -> R>(&mut self, callback: CALLBACK) -> R {
+        FgrCtx::batch(self, callback)
+    }
+
+    fn fgr_create_root<R, CALLBACK: FnOnce(&mut Self, RootScope<Self>) -> R>(&mut self, callback: CALLBACK) -> R {
+        FgrCtx::create_root(self, callback)
+    }
+
+    fn fgr_create_effect<CALLBACK: FnMut(&mut Self) + Send + Sync + 'static>(&mut self, callback: CALLBACK) {
+        FgrCtx::create_effect(self, callback)
+    }
+}
+
+impl<CTX: HasFgrCtx + 'static> FgrCtx<CTX> {
     fn alloc_id(&mut self) -> u64 {
         let id = self.next_id;
         self.next_id += 1;
@@ -48,27 +68,35 @@ impl FgrCtx {
         }
     }
 
-    pub fn batch<R, CALLBACK: FnOnce(&mut Self) -> R>(&mut self, callback: CALLBACK) -> R {
-        self.transaction_level += 1;
-        let result = callback(self);
-        self.transaction_level -= 1;
-        if self.transaction_level == 0 {
-            update_graph(self);
+    pub fn batch<R, CALLBACK: FnOnce(&mut CTX) -> R>(ctx: &mut CTX, callback: CALLBACK) -> R {
+        {
+            let fgr_ctx = &mut ctx.fgr_ctx();
+            fgr_ctx.transaction_level += 1;
+        }
+        let result = callback(ctx);
+        let hit_level_zero: bool;
+        {
+            let fgr_ctx = &mut ctx.fgr_ctx();
+            fgr_ctx.transaction_level -= 1;
+            hit_level_zero = fgr_ctx.transaction_level == 0;
+        }
+        if hit_level_zero {
+            update_graph(ctx);
         }
         result
     }
 
-    pub fn create_root<R, CALLBACK: FnOnce(&mut Self, RootScope) -> R>(&mut self, callback: CALLBACK) -> R {
-        self.batch(|fgr_ctx| {
+    pub fn create_root<R, CALLBACK: FnOnce(&mut CTX, RootScope<CTX>) -> R>(ctx: &mut CTX, callback: CALLBACK) -> R {
+        ctx.fgr_batch(|ctx| {
             let scope = RootScope {
                 scope: Arc::new(RwLock::new(Vec::new())),
             };
-            fgr_ctx.witness_created = true;
-            let result = callback(fgr_ctx, scope.clone());
-            fgr_ctx.witness_created = false;
+            ctx.fgr_ctx().witness_created = true;
+            let result = callback(ctx, scope.clone());
+            ctx.fgr_ctx().witness_created = false;
             {
                 let mut scope = (*scope.scope).write().unwrap();
-                for node in fgr_ctx.created_nodes.drain(..) {
+                for node in ctx.fgr_ctx().created_nodes.drain(..) {
                     scope.push(node);
                 }
             }
@@ -76,13 +104,13 @@ impl FgrCtx {
         })
     }
 
-    pub fn create_effect<CALLBACK: FnMut(&mut FgrCtx) + Send + Sync + 'static>(&mut self, callback: CALLBACK) {
-        if !self.witness_created {
+    pub fn create_effect<CALLBACK: FnMut(&mut CTX) + Send + Sync + 'static>(ctx: &mut CTX, callback: CALLBACK) {
+        if !ctx.fgr_ctx().witness_created {
             panic!("Effect created outside of scope. Did you forget to call create_root()?");
         }
-        let id = self.alloc_id();
-        let effect: Arc<RwLock<dyn FnMut(&mut FgrCtx) + Send + Sync>> = Arc::new(RwLock::new(callback));
-        let impl_: Arc<RwLock<dyn IsNode + Send + Sync>> = Arc::new(RwLock::new(EffectImpl {
+        let id = ctx.fgr_ctx().alloc_id();
+        let effect: Arc<RwLock<dyn FnMut(&mut CTX) + Send + Sync>> = Arc::new(RwLock::new(callback));
+        let impl_: Arc<RwLock<dyn IsNode<CTX> + Send + Sync>> = Arc::new(RwLock::new(EffectImpl {
             node_data: NodeData {
                 id,
                 flag: NodeFlag::Stale,
@@ -97,33 +125,33 @@ impl FgrCtx {
             id,
             node: Arc::clone(&impl_),
         };
-        self.created_nodes.push(result.clone());
-        self.stack.push(result.clone());
-        self.defered_effects.push(Box::new(move |fgr_ctx| {
-            fgr_ctx.witness_created = true;
-            fgr_ctx.witness_observe = true;
-            (*effect).write().unwrap()(fgr_ctx);
-            fgr_ctx.witness_created = false;
-            fgr_ctx.witness_observe = false;
+        ctx.fgr_ctx().created_nodes.push(result.clone());
+        ctx.fgr_ctx().stack.push(result.clone());
+        ctx.fgr_ctx().defered_effects.push(Box::new(move |ctx| {
+            ctx.fgr_ctx().witness_created = true;
+            ctx.fgr_ctx().witness_observe = true;
+            (*effect).write().unwrap()(ctx);
+            ctx.fgr_ctx().witness_created = false;
+            ctx.fgr_ctx().witness_observe = false;
             let mut impl_ = impl_.write().unwrap();
-            for node in fgr_ctx.observed_nodes.drain(..) {
+            for node in ctx.fgr_ctx().observed_nodes.drain(..) {
                 impl_.node_data_mut().dependencies.push(node.clone());
                 node.with_node_mut(|node| {
                     node.node_data_mut().dependents.push(result.clone());
                 });
             }
-            for node in fgr_ctx.created_nodes.drain(..) {
+            for node in ctx.fgr_ctx().created_nodes.drain(..) {
                 impl_.node_data_mut().scoped.push(node.clone());
             }
         }));
     }
 }
 
-pub struct RootScope {
-    scope: Arc<RwLock<Vec<NodeRef>>>,
+pub struct RootScope<CTX> {
+    scope: Arc<RwLock<Vec<NodeRef<CTX>>>>,
 }
 
-impl Clone for RootScope {
+impl<CTX> Clone for RootScope<CTX> {
     fn clone(&self) -> Self {
         Self {
             scope: Arc::clone(&self.scope),
@@ -131,9 +159,9 @@ impl Clone for RootScope {
     }
 }
 
-impl RootScope {
+impl<CTX: HasFgrCtx> RootScope<CTX> {
     pub fn dispose(&mut self) {
-        let mut scope: Vec<NodeRef> = Vec::new();
+        let mut scope: Vec<NodeRef<CTX>> = Vec::new();
         std::mem::swap(&mut *(*self.scope).write().unwrap(), &mut scope);
         for node in scope {
             (*node.node).write().unwrap().dispose();
@@ -141,12 +169,12 @@ impl RootScope {
     }
 }
 
-pub struct EffectImpl {
-    node_data: NodeData,
-    effect: Option<Arc<RwLock<dyn FnMut(&mut FgrCtx) + Send + Sync>>>,
+pub struct EffectImpl<CTX> {
+    node_data: NodeData<CTX>,
+    effect: Option<Arc<RwLock<dyn FnMut(&mut CTX) + Send + Sync>>>,
 }
 
-impl IsNode for EffectImpl {
+impl<CTX: HasFgrCtx + 'static> IsNode<CTX> for EffectImpl<CTX> {
     fn is_source(&self) -> bool {
         false
     }
@@ -155,26 +183,26 @@ impl IsNode for EffectImpl {
         true
     }
 
-    fn node_data(&self) -> &NodeData {
+    fn node_data(&self) -> &NodeData<CTX> {
         &self.node_data
     }
 
-    fn node_data_mut(&mut self) -> &mut NodeData {
+    fn node_data_mut(&mut self) -> &mut NodeData<CTX> {
         &mut self.node_data
     }
 
-    fn update(&mut self, self_node_ref: NodeRef, fgr_ctx: &mut FgrCtx) -> bool {
+    fn update(&mut self, self_node_ref: NodeRef<CTX>, ctx: &mut CTX) -> bool {
         let Some(effect) = self.effect.as_ref() else { return false; };
         let effect = Arc::clone(effect);
-        fgr_ctx.defered_effects.push(Box::new(move |fgr_ctx| {
-            fgr_ctx.witness_observe = true;
-            fgr_ctx.witness_created = true;
-            effect.write().unwrap()(fgr_ctx);
-            fgr_ctx.witness_observe = false;
-            fgr_ctx.witness_created = false;
-            let mut dependencies_to_remove: Vec<NodeRef> = Vec::new();
-            let mut dependencies_to_add: Vec<NodeRef> = Vec::new();
-            for dep in &fgr_ctx.observed_nodes {
+        ctx.fgr_ctx().defered_effects.push(Box::new(move |ctx| {
+            ctx.fgr_ctx().witness_observe = true;
+            ctx.fgr_ctx().witness_created = true;
+            effect.write().unwrap()(ctx);
+            ctx.fgr_ctx().witness_observe = false;
+            ctx.fgr_ctx().witness_created = false;
+            let mut dependencies_to_remove: Vec<NodeRef<CTX>> = Vec::new();
+            let mut dependencies_to_add: Vec<NodeRef<CTX>> = Vec::new();
+            for dep in &ctx.fgr_ctx().observed_nodes {
                 let has = self_node_ref.with_node(|self_node| self_node.node_data().dependencies.contains(dep));
                 if !has {
                     dependencies_to_add.push(dep.clone());
@@ -182,7 +210,7 @@ impl IsNode for EffectImpl {
             }
             self_node_ref.with_node(|self_node| {
                 for dep in &self_node.node_data().dependencies {
-                    let has = fgr_ctx.observed_nodes.contains(dep);
+                    let has = ctx.fgr_ctx().observed_nodes.contains(dep);
                     if !has {
                         dependencies_to_remove.push(dep.clone());
                     }
@@ -195,7 +223,7 @@ impl IsNode for EffectImpl {
                 self_node_ref.with_node_mut(|self_node| self_node.node_data_mut().dependencies.push(dep));
             }
             self_node_ref.with_node_mut(|self_node| {
-                std::mem::swap(&mut self_node.node_data_mut().scoped, &mut fgr_ctx.created_nodes);
+                std::mem::swap(&mut self_node.node_data_mut().scoped, &mut ctx.fgr_ctx().created_nodes);
             });
         }));
         false
@@ -203,7 +231,7 @@ impl IsNode for EffectImpl {
 
     fn dispose(&mut self) {
         //
-        println!("dispose node {:?}", self as *const dyn IsNode);
+        println!("dispose node {:}", self.node_data.id);
         //
         for dependency in self.node_data.dependencies.drain(..) {
             dependency.with_node_mut(|node| {
@@ -216,32 +244,32 @@ impl IsNode for EffectImpl {
     }
 }
 
-pub struct Memo<A> {
-    impl_: Arc<RwLock<MemoImpl<A>>>,
+pub struct Memo<CTX, A> {
+    impl_: Arc<RwLock<MemoImpl<CTX, A>>>,
 }
 
-impl<A: Send + Sync + 'static> std::fmt::Debug for Memo<A> {
+impl<CTX: HasFgrCtx + 'static, A: Send + Sync + 'static> std::fmt::Debug for Memo<CTX, A> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "(Memo {})", Into::<NodeRef>::into(self).id)
+        write!(f, "(Memo {})", Into::<NodeRef<CTX>>::into(self).id)
     }
 }
 
-impl<A: Send + Sync + 'static> Memo<A> {
-    pub fn new(fgr_ctx: &mut FgrCtx, update_fn: impl FnMut(&mut FgrCtx) -> A + Send + Sync + 'static) -> Self
+impl<CTX: HasFgrCtx + 'static, A: Send + Sync + 'static> Memo<CTX, A> {
+    pub fn new(fgr_ctx: &mut CTX, update_fn: impl FnMut(&mut CTX) -> A + Send + Sync + 'static) -> Self
     where A: PartialEq<A>
     {
         Self::new_with_diff(fgr_ctx, update_fn, |a, b| a == b)        
     }
 
-    pub fn new_no_diff(fgr_ctx: &mut FgrCtx, update_fn: impl FnMut(&mut FgrCtx) -> A + Send + Sync + 'static) -> Self {
+    pub fn new_no_diff(fgr_ctx: &mut CTX, update_fn: impl FnMut(&mut CTX) -> A + Send + Sync + 'static) -> Self {
         Self::new_with_diff(fgr_ctx, update_fn, |_a, _b| false)
     }
 
-    pub fn new_with_diff(fgr_ctx: &mut FgrCtx, mut update_fn: impl FnMut(&mut FgrCtx) -> A + Send + Sync + 'static, compare_fn: impl FnMut(&A, &A) -> bool + Send + Sync + 'static) -> Self {
-        if !fgr_ctx.witness_created {
+    pub fn new_with_diff(ctx: &mut CTX, mut update_fn: impl FnMut(&mut CTX) -> A + Send + Sync + 'static, compare_fn: impl FnMut(&A, &A) -> bool + Send + Sync + 'static) -> Self {
+        if !ctx.fgr_ctx().witness_created {
             panic!("Memo created outside of scope. Did you forget to call create_root()?");
         }
-        let id = fgr_ctx.alloc_id();
+        let id = ctx.fgr_ctx().alloc_id();
         let impl_ = Arc::new(RwLock::new(MemoImpl {
             node_data: NodeData {
                 id,
@@ -258,11 +286,11 @@ impl<A: Send + Sync + 'static> Memo<A> {
         let result = Self {
             impl_,
         };
-        let self_ref: NodeRef = (&result).into();
-        fgr_ctx.witness_observe = true;
-        let value = update_fn(fgr_ctx);
-        fgr_ctx.witness_observe = false;
-        for node in fgr_ctx.observed_nodes.drain(..) {
+        let self_ref: NodeRef<CTX> = (&result).into();
+        ctx.fgr_ctx().witness_observe = true;
+        let value = update_fn(ctx);
+        ctx.fgr_ctx().witness_observe = false;
+        for node in ctx.fgr_ctx().observed_nodes.drain(..) {
             node.with_node_mut(|node| {
                 if !node.node_data_mut().dependents.contains(&self_ref) {
                     node.node_data_mut().dependents.push(self_ref.clone());
@@ -279,21 +307,21 @@ impl<A: Send + Sync + 'static> Memo<A> {
             tmp.value = Some(value);
             tmp.update_fn = Some(Box::new(update_fn));
         }
-        fgr_ctx.created_nodes.push(self_ref);
+        ctx.fgr_ctx().created_nodes.push(self_ref);
         result
     }
 }
 
-impl<A: Send + Sync + 'static> Memo<A> {
-    pub fn value<'a>(&'a self, fgr_ctx: &mut FgrCtx) -> impl std::ops::Deref<Target=A> + 'a {
-        if fgr_ctx.witness_observe {
-            fgr_ctx.observed_nodes.push(self.into());
+impl<CTX: HasFgrCtx + 'static, A: Send + Sync + 'static> Memo<CTX, A> {
+    pub fn value<'a>(&'a self, ctx: &mut CTX) -> impl std::ops::Deref<Target=A> + 'a {
+        if ctx.fgr_ctx().witness_observe {
+            ctx.fgr_ctx().observed_nodes.push(self.into());
         }
         let impl_ = (*self.impl_).read().unwrap();
-        struct MyRef<'a,A> {
-            impl_: RwLockReadGuard<'a, MemoImpl<A>>,
+        struct MyRef<'a,CTX,A> {
+            impl_: RwLockReadGuard<'a, MemoImpl<CTX, A>>,
         }
-        impl<'a, A> std::ops::Deref for MyRef<'a, A> {
+        impl<'a, CTX, A> std::ops::Deref for MyRef<'a, CTX, A> {
             type Target = A;
             fn deref(&self) -> &Self::Target {
                 self.impl_.value.as_ref().unwrap()
@@ -304,7 +332,7 @@ impl<A: Send + Sync + 'static> Memo<A> {
     }
 }
 
-impl<A> Clone for Memo<A> {
+impl<CTX, A> Clone for Memo<CTX, A> {
     fn clone(&self) -> Self {
         Self {
             impl_: Arc::clone(&self.impl_),
@@ -312,8 +340,8 @@ impl<A> Clone for Memo<A> {
     }
 }
 
-impl<A: Send + Sync + 'static> Into<NodeRef> for &Memo<A> {
-    fn into(self) -> NodeRef {
+impl<CTX: HasFgrCtx + 'static, A: Send + Sync + 'static> Into<NodeRef<CTX>> for &Memo<CTX, A> {
+    fn into(self) -> NodeRef<CTX> {
         let id = self.impl_.read().unwrap().node_data.id;
         let node = Arc::clone(&self.impl_);
         NodeRef {
@@ -323,14 +351,14 @@ impl<A: Send + Sync + 'static> Into<NodeRef> for &Memo<A> {
     }
 }
 
-pub struct MemoImpl<A> {
-    node_data: NodeData,
+pub struct MemoImpl<CTX, A> {
+    node_data: NodeData<CTX>,
     value: Option<A>, // <-- only temporarly None during initialization.
-    update_fn: Option<Box<dyn FnMut(&mut FgrCtx) -> A + Send + Sync>>, // <-- only temporarly None during initialization.
+    update_fn: Option<Box<dyn FnMut(&mut CTX) -> A + Send + Sync>>, // <-- only temporarly None during initialization.
     compare_fn: Box<dyn FnMut(&A, &A) -> bool + Send + Sync>,
 }
 
-impl<A> IsNode for MemoImpl<A> {
+impl<CTX: HasFgrCtx, A> IsNode<CTX> for MemoImpl<CTX,A> {
     fn is_source(&self) -> bool {
         false
     }
@@ -339,16 +367,16 @@ impl<A> IsNode for MemoImpl<A> {
         false
     }
 
-    fn node_data(&self) -> &NodeData {
+    fn node_data(&self) -> &NodeData<CTX> {
         &self.node_data
     }
 
-    fn node_data_mut(&mut self) -> &mut NodeData {
+    fn node_data_mut(&mut self) -> &mut NodeData<CTX> {
         &mut self.node_data
     }
 
-    fn update(&mut self, _self_node_ref: NodeRef, fgr_ctx: &mut FgrCtx) -> bool {
-        let next_value = (self.update_fn.as_mut().unwrap())(fgr_ctx);
+    fn update(&mut self, _self_node_ref: NodeRef<CTX>, ctx: &mut CTX) -> bool {
+        let next_value = (self.update_fn.as_mut().unwrap())(ctx);
         let changed = !(self.compare_fn)(&next_value, self.value.as_ref().unwrap());
         self.value = Some(next_value);
         changed
@@ -356,7 +384,7 @@ impl<A> IsNode for MemoImpl<A> {
 
     fn dispose(&mut self) {
         //
-        println!("dispose node {:?}", self as *const dyn IsNode);
+        println!("dispose node {}", self.node_data.id);
         //
         for dependency in self.node_data.dependencies.drain(..) {
             dependency.with_node_mut(|node| {
@@ -381,13 +409,13 @@ impl<A> IsNode for MemoImpl<A> {
     }
 }
 
-pub struct Signal<A> {
-    impl_: Arc<RwLock<SignalImpl<A>>>,
+pub struct Signal<CTX, A> {
+    impl_: Arc<RwLock<SignalImpl<CTX, A>>>,
 }
 
-impl<A> Signal<A> {
-    pub fn new(fgr_ctx: &mut FgrCtx, value: A) -> Self {
-        let id = fgr_ctx.alloc_id();
+impl<CTX: HasFgrCtx + 'static, A> Signal<CTX, A> {
+    pub fn new(ctx: &mut CTX, value: A) -> Self {
+        let id = ctx.fgr_ctx().alloc_id();
         Self {
             impl_: Arc::new(RwLock::new(SignalImpl {
                 node_data: NodeData {
@@ -405,13 +433,13 @@ impl<A> Signal<A> {
     }
 }
 
-impl<A: Send + Sync + 'static> std::fmt::Debug for Signal<A> {
+impl<CTX: HasFgrCtx + 'static, A: Send + Sync + 'static> std::fmt::Debug for Signal<CTX, A> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "(Signal {})", Into::<NodeRef>::into(self).id)
+        write!(f, "(Signal {})", Into::<NodeRef<CTX>>::into(self).id)
     }
 }
 
-impl<A> Clone for Signal<A> {
+impl<CTX, A> Clone for Signal<CTX, A> {
     fn clone(&self) -> Self {
         Self {
             impl_: Arc::clone(&self.impl_),
@@ -419,8 +447,8 @@ impl<A> Clone for Signal<A> {
     }
 }
 
-impl<A: Send + Sync + 'static> Into<NodeRef> for &Signal<A> {
-    fn into(self) -> NodeRef {
+impl<CTX: HasFgrCtx + 'static, A: Send + Sync + 'static> Into<NodeRef<CTX>> for &Signal<CTX, A> {
+    fn into(self) -> NodeRef<CTX> {
         let id = self.impl_.read().unwrap().node_data.id;
         let node = Arc::clone(&self.impl_);
         NodeRef {
@@ -430,13 +458,13 @@ impl<A: Send + Sync + 'static> Into<NodeRef> for &Signal<A> {
     }
 }
 
-struct SignalImpl<A> {
-    node_data: NodeData,
+struct SignalImpl<CTX, A> {
+    node_data: NodeData<CTX>,
     value: A,
     value_changed: bool,
 }
 
-impl<A> IsNode for SignalImpl<A> {
+impl<CTX: HasFgrCtx + 'static, A> IsNode<CTX> for SignalImpl<CTX, A> {
     fn is_source(&self) -> bool {
         true
     }
@@ -445,15 +473,15 @@ impl<A> IsNode for SignalImpl<A> {
         false
     }
 
-    fn node_data(&self) -> &NodeData {
+    fn node_data(&self) -> &NodeData<CTX> {
         &self.node_data
     }
 
-    fn node_data_mut(&mut self) -> &mut NodeData {
+    fn node_data_mut(&mut self) -> &mut NodeData<CTX> {
         &mut self.node_data
     }
 
-    fn update(&mut self, _self_node_ref: NodeRef, _fgr_ctx: &mut FgrCtx) -> bool {
+    fn update(&mut self, _self_node_ref: NodeRef<CTX>, _fgr_ctx: &mut CTX) -> bool {
         let result = self.value_changed;
         self.value_changed = false;
         result
@@ -462,16 +490,16 @@ impl<A> IsNode for SignalImpl<A> {
     fn dispose(&mut self) { /* do nothing */}
 }
 
-impl<A: Send + Sync + 'static> Signal<A> {
-    pub fn value<'a>(&'a self, fgr_ctx: &mut FgrCtx) -> impl std::ops::Deref<Target=A> + 'a {
-        if fgr_ctx.witness_observe {
-            fgr_ctx.observed_nodes.push(self.into());
+impl<CTX: HasFgrCtx + 'static, A: Send + Sync + 'static> Signal<CTX, A> {
+    pub fn value<'a>(&'a self, ctx: &mut CTX) -> impl std::ops::Deref<Target=A> + 'a {
+        if ctx.fgr_ctx().witness_observe {
+            ctx.fgr_ctx().observed_nodes.push(self.into());
         }
         let impl_ = (*self.impl_).read().unwrap();
-        struct MyRef<'a,A> {
-            impl_: RwLockReadGuard<'a, SignalImpl<A>>,
+        struct MyRef<'a,CTX,A> {
+            impl_: RwLockReadGuard<'a, SignalImpl<CTX,A>>,
         }
-        impl<'a, A> std::ops::Deref for MyRef<'a, A> {
+        impl<'a, CTX, A> std::ops::Deref for MyRef<'a, CTX, A> {
             type Target = A;
             fn deref(&self) -> &Self::Target {
                 &self.impl_.value
@@ -481,11 +509,11 @@ impl<A: Send + Sync + 'static> Signal<A> {
         val
     }
 
-    pub fn update_value<CALLBACK: FnOnce(&mut A)>(&mut self, fgr_ctx: &mut FgrCtx, callback: CALLBACK) {
+    pub fn update_value<CALLBACK: FnOnce(&mut A)>(&mut self, ctx: &mut CTX, callback: CALLBACK) {
         //
-        println!("Signal::update_value called on {:?}", (Into::<NodeRef>::into(&*self)));
+        println!("Signal::update_value called on {:?}", (Into::<NodeRef<CTX>>::into(&*self)));
         //
-        fgr_ctx.batch(|fgr_ctx| {
+        ctx.fgr_batch(|ctx| {
             {
                 let mut impl_ = (*self.impl_).write().unwrap();
                 callback(&mut impl_.value);
@@ -493,8 +521,8 @@ impl<A: Send + Sync + 'static> Signal<A> {
                 impl_.node_data.flag = NodeFlag::Stale;
             }
             // add self to stack for propergating dependent flags to stale.
-            fgr_ctx.stack.push((&*self).into());
-            propergate_dependents_flags_to_stale(fgr_ctx);
+            ctx.fgr_ctx().stack.push((&*self).into());
+            propergate_dependents_flags_to_stale(ctx);
         });
     }
 }
@@ -505,42 +533,42 @@ enum NodeFlag {
     Stale,
 }
 
-struct NodeData {
+struct NodeData<CTX> {
     id: u64,
     flag: NodeFlag,
     changed: bool,
-    dependencies: Vec<NodeRef>,
-    dependents: Vec<NodeRef>,
-    scoped: Vec<NodeRef>,
+    dependencies: Vec<NodeRef<CTX>>,
+    dependents: Vec<NodeRef<CTX>>,
+    scoped: Vec<NodeRef<CTX>>,
 }
 
-trait IsNode {
+trait IsNode<CTX: HasFgrCtx> {
     fn is_source(&self) -> bool;
     fn is_sink(&self) -> bool;
-    fn node_data(&self) -> &NodeData;
-    fn node_data_mut(&mut self) -> &mut NodeData;
-    fn update(&mut self, self_node_ref: NodeRef, fgr_ctx: &mut FgrCtx) -> bool;
+    fn node_data(&self) -> &NodeData<CTX>;
+    fn node_data_mut(&mut self) -> &mut NodeData<CTX>;
+    fn update(&mut self, self_node_ref: NodeRef<CTX>, ctx: &mut CTX) -> bool;
     fn dispose(&mut self);
 }
 
-pub struct NodeRef {
+pub struct NodeRef<CTX> {
     id: u64,
-    node: Arc<RwLock<dyn IsNode + Send + Sync>>,
+    node: Arc<RwLock<dyn IsNode<CTX> + Send + Sync>>,
 }
 
-impl std::fmt::Debug for NodeRef {
+impl<CTX> std::fmt::Debug for NodeRef<CTX> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "(Node Ref {})", self.id)
     }
 }
 
-impl PartialEq for NodeRef {
+impl<CTX> PartialEq for NodeRef<CTX> {
     fn eq(&self, other: &Self) -> bool {
         Arc::ptr_eq(&self.node, &other.node)
     }
 }
 
-impl Clone for NodeRef {
+impl<CTX> Clone for NodeRef<CTX> {
     fn clone(&self) -> Self {
         Self {
             id: self.id,
@@ -549,28 +577,28 @@ impl Clone for NodeRef {
     }
 }
 
-impl NodeRef {
+impl<CTX> NodeRef<CTX> {
     fn with_node<F, T>(&self, f: F) -> T
     where
-        F: FnOnce(&dyn IsNode) -> T,
+        F: FnOnce(&dyn IsNode<CTX>) -> T,
     {
         f(&*(*self.node).read().unwrap())
     }
     fn with_node_mut<F, T>(&self, f: F) -> T
     where
-        F: FnOnce(&mut dyn IsNode) -> T,
+        F: FnOnce(&mut dyn IsNode<CTX>) -> T,
     {
         f(&mut *(*self.node).write().unwrap())
     }
 }
 
-fn update_graph(fgr_ctx: &mut FgrCtx) {
+fn update_graph<CTX: HasFgrCtx>(ctx: &mut CTX) {
     let mut tmp_buffer_1 = Vec::new();
     let mut tmp_buffer_2 = Vec::new();
     let mut stack = Vec::new();
-    std::mem::swap(&mut fgr_ctx.tmp_buffer_1, &mut tmp_buffer_1);
-    std::mem::swap(&mut fgr_ctx.tmp_buffer_2, &mut tmp_buffer_2);
-    std::mem::swap(&mut fgr_ctx.stack, &mut stack);
+    std::mem::swap(&mut ctx.fgr_ctx().tmp_buffer_1, &mut tmp_buffer_1);
+    std::mem::swap(&mut ctx.fgr_ctx().tmp_buffer_2, &mut tmp_buffer_2);
+    std::mem::swap(&mut ctx.fgr_ctx().stack, &mut stack);
     //
     println!("update_graph: {} nodes", stack.len());
     //
@@ -616,26 +644,26 @@ fn update_graph(fgr_ctx: &mut FgrCtx) {
                     let node2 = node.clone();
                     let changed = node.with_node_mut(|n| {
                         if !(is_source || is_sink) {
-                            fgr_ctx.witness_created = true;
-                            fgr_ctx.witness_observe = true;
+                            ctx.fgr_ctx().witness_created = true;
+                            ctx.fgr_ctx().witness_observe = true;
                             for scoped in n.node_data_mut().scoped.drain(..) {
                                 (*scoped.node).write().unwrap().dispose();
                             }
                         }
-                        let changed = n.update(node2, fgr_ctx);
+                        let changed = n.update(node2, ctx);
                         if !(is_source || is_sink) {
-                            fgr_ctx.witness_observe = false;
-                            fgr_ctx.witness_created = false;
-                            let mut dependencies_to_remove: Vec<NodeRef> = Vec::new();
-                            let mut dependencies_to_add: Vec<NodeRef> = Vec::new();
-                            for dep in &fgr_ctx.observed_nodes {
+                            ctx.fgr_ctx().witness_observe = false;
+                            ctx.fgr_ctx().witness_created = false;
+                            let mut dependencies_to_remove: Vec<NodeRef<CTX>> = Vec::new();
+                            let mut dependencies_to_add: Vec<NodeRef<CTX>> = Vec::new();
+                            for dep in &ctx.fgr_ctx().observed_nodes {
                                 let has = n.node_data().dependencies.contains(dep);
                                 if !has {
                                     dependencies_to_add.push(dep.clone());
                                 }
                             }
                             for dep in &n.node_data().dependencies {
-                                let has = fgr_ctx.observed_nodes.contains(dep);
+                                let has = ctx.fgr_ctx().observed_nodes.contains(dep);
                                 if !has {
                                     dependencies_to_remove.push(dep.clone());
                                 }
@@ -646,7 +674,7 @@ fn update_graph(fgr_ctx: &mut FgrCtx) {
                             for dep in dependencies_to_add {
                                 n.node_data_mut().dependencies.push(dep);
                             }
-                            std::mem::swap(&mut n.node_data_mut().scoped, &mut fgr_ctx.created_nodes);
+                            std::mem::swap(&mut n.node_data_mut().scoped, &mut ctx.fgr_ctx().created_nodes);
                         }
                         let n2 = n.node_data_mut();
                         n2.changed = changed;
@@ -674,33 +702,35 @@ fn update_graph(fgr_ctx: &mut FgrCtx) {
     println!("update_graph finished.");
     //
     let mut deferred_effects = Vec::new();
-    std::mem::swap(&mut fgr_ctx.defered_effects, &mut deferred_effects);
+    std::mem::swap(&mut ctx.fgr_ctx().defered_effects, &mut deferred_effects);
     for effect in deferred_effects {
-        effect(fgr_ctx);
+        effect(ctx);
     }
 }
 
-fn propergate_dependents_flags_to_stale(fgr_ctx: &mut FgrCtx) {
+fn propergate_dependents_flags_to_stale<CTX: HasFgrCtx + 'static>(ctx: &mut CTX) {
     loop {
-        let Some(at) = fgr_ctx.stack.pop() else { break; };
+        let Some(at) = ctx.fgr_ctx().stack.pop() else { break; };
         at.with_node(|n| {
             for dep in &n.node_data().dependents {
-                fgr_ctx.tmp_buffer_1.push(dep.clone());
-                fgr_ctx.tmp_buffer_2.push(dep.clone());
+                ctx.fgr_ctx().tmp_buffer_1.push(dep.clone());
+                ctx.fgr_ctx().tmp_buffer_2.push(dep.clone());
             }
         });
+        let fgr_ctx = &mut *ctx.fgr_ctx();
         for dep in fgr_ctx.tmp_buffer_1.drain(..) {
             println!("  dep: {:?} marked stale", dep);
             dep.with_node_mut(|n| n.node_data_mut().flag = NodeFlag::Stale);
             fgr_ctx.stack.push(dep);
         }
     }
+    let fgr_ctx = &mut *ctx.fgr_ctx();
     for dep in fgr_ctx.tmp_buffer_2.drain(..) {
         fgr_ctx.stack.push(dep);
     }
 }
 
-pub fn print_graph(node: NodeRef) {
+pub fn print_graph<CTX: HasFgrCtx>(node: NodeRef<CTX>) {
     println!("-- Graph Start --");
     let mut stack = vec![node];
     while let Some(node) = stack.pop() {

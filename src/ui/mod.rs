@@ -16,16 +16,22 @@ pub use ui_component::UiComponentMount;
 use crate::cloned;
 use crate::fgr::FgrCtx;
 use crate::fgr::RootScope;
+use crate::fgr::FgrExtensionMethods;
 
-pub fn render<'a, R: UiComponentMount + Sync + Send + 'static, CALLBACK: FnOnce(&mut FgrCtx) -> R>(app: &mut App, callback: CALLBACK) -> RootScope {
-    let mut fgr_ctx = FgrCtx::new();
-    let (mount, root_scope) = fgr_ctx.create_root(|fgr_ctx, root_scope| {
-        let mount = callback(fgr_ctx);
-        (mount, root_scope)
-    });
+pub fn render<'a, R: UiComponentMount + Sync + Send + 'static, CALLBACK: FnOnce(&mut World) -> R>(app: &mut App, callback: CALLBACK) -> RootScope<World> {
+    let mount;
+    let root_scope;
+    app.insert_resource(FgrCtx::<World>::new());
+    {
+        let world = app.world_mut();
+        let ctx = world;
+        (mount, root_scope) = ctx.fgr_create_root(|ctx, root_scope| {
+            let mount = callback(ctx);
+            (mount, root_scope)
+        });
+    }
     let mount = Arc::new(Mutex::new(mount));
     app
-        .insert_resource(fgr_ctx)
         .add_systems(
             Startup,
             cloned!((mount) => move |world: &mut World| {

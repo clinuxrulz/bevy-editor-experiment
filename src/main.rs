@@ -1,4 +1,4 @@
-use bevy::{ecs::schedule::ScheduleLabel, prelude::*, winit::WinitSettings};
+use bevy::{prelude::*, winit::WinitSettings};
 
 #[cfg(test)]
 mod tests;

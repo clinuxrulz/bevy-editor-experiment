@@ -23,13 +23,15 @@ impl Default for TextBoxProps {
 impl UiComponent<TextBoxProps> for TextBox {
     fn execute(world: &mut World, props: TextBoxProps) -> Box<dyn FnMut(&mut World) + Send + Sync> {
         struct TextBoxState {
-            is_selected: bool,
+            has_focus: bool,
             cursor_position: usize,
         }
-        /*
         let state: Arc<RwLock<TextBoxState>> = Arc::new(RwLock::new(
-            TextBoxState {}
-        ));*/
+            TextBoxState {
+                has_focus: false,
+                cursor_position: 0,
+            }
+        ));
         let update: Box<dyn FnMut(&mut World) + Send + Sync> = Box::new(cloned!((/*state*/) => move |world| {
 
         }));

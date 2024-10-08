@@ -6,13 +6,13 @@ use crate::{cloned, fgr::FgrExtensionMethods};
 
 use super::UiComponent;
 
-pub struct Checkbox;
+pub struct CheckBox;
 
-pub struct CheckboxProps {
+pub struct CheckBoxProps {
     pub on_changed: Option<Box<dyn FnMut(&mut World, bool) + Send + Sync>>,
 }
 
-impl Default for CheckboxProps {
+impl Default for CheckBoxProps {
     fn default() -> Self {
         Self {
             on_changed: Default::default(),
@@ -20,10 +20,10 @@ impl Default for CheckboxProps {
     }
 }
 
-impl UiComponent<CheckboxProps> for Checkbox {
-    fn execute(world: &mut World, props: CheckboxProps) -> Box<dyn FnMut(&mut World) + Send + Sync> {
+impl UiComponent<CheckBoxProps> for CheckBox {
+    fn execute(world: &mut World, props: CheckBoxProps) -> Box<dyn FnMut(&mut World) + Send + Sync> {
         struct CheckboxMount {
-            props: CheckboxProps,
+            props: CheckBoxProps,
             checkbox_entity: Entity,
             last_interaction: Interaction,
             checked: bool,

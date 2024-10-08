@@ -1,4 +1,4 @@
-mod checkbox;
+mod check_box;
 mod ui_component;
 
 use std::sync::Arc;
@@ -7,8 +7,8 @@ use std::sync::Mutex;
 use bevy::app::App;
 use bevy::app::Update;
 use bevy::prelude::World;
-pub use checkbox::Checkbox;
-pub use checkbox::CheckboxProps;
+pub use check_box::CheckBox;
+pub use check_box::CheckBoxProps;
 pub use ui_component::UiComponent;
 
 use crate::fgr::FgrCtx;

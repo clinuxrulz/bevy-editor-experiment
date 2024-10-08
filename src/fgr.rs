@@ -306,6 +306,94 @@ impl<CTX: HasFgrCtx + 'static> IsNode<CTX> for EffectImpl<CTX> {
     }
 }
 
+pub struct BoxedAccessor<CTX, A>(Box<dyn BoxedAccessorImpl<CTX, A>>);
+
+impl<CTX: HasFgrCtx + 'static, A: Send + Sync + 'static> Into<BoxedAccessor<CTX,A>> for Memo<CTX, A> {
+    fn into(self) -> BoxedAccessor<CTX,A> {
+        BoxedAccessor(Box::new(self.clone()))
+    }
+}
+
+impl<CTX: HasFgrCtx + 'static, A: Send + Sync + 'static> Into<BoxedAccessor<CTX,A>> for Signal<CTX, A> {
+    fn into(self) -> BoxedAccessor<CTX,A> {
+        BoxedAccessor(Box::new(self.clone()))
+    }
+}
+
+impl<CTX: HasFgrCtx + 'static, A: Send + Sync + 'static> Into<BoxedAccessor<CTX,A>> for ConstAccessor<A> {
+    fn into(self) -> BoxedAccessor<CTX,A> {
+        BoxedAccessor(Box::new(self.clone()))
+    }
+}
+
+impl<CTX,A> BoxedAccessor<CTX,A> {
+    pub fn with_value<R:'static, CALLBACK: FnOnce(&A)->R + 'static>(&self, ctx: &mut CTX, callback: CALLBACK) -> R {
+        let mut result: Option<R> = None;
+        self.0.with_value(ctx, Box::new(|a| {
+            result = Some(callback(a));
+        }));
+        return result.unwrap();
+    }
+}
+
+trait BoxedAccessorImpl<CTX,A> {
+    fn with_value<'a>(&'a self, ctx: &mut CTX, callback: Box<dyn FnOnce(&A) + 'a>);
+}
+
+impl <CTX: HasFgrCtx + 'static, A: Send + Sync + 'static> BoxedAccessorImpl<CTX, A> for Memo<CTX, A> {
+    fn with_value<'a>(&'a self, ctx: &mut CTX, callback: Box<dyn FnOnce(&A) + 'a>) {
+        callback(&self.value(ctx));
+    }
+}
+
+impl <CTX: HasFgrCtx + 'static, A: Send + Sync + 'static> BoxedAccessorImpl<CTX, A> for Signal<CTX, A> {
+    fn with_value<'a>(&'a self, ctx: &mut CTX, callback: Box<dyn FnOnce(&A) + 'a>) {
+        callback(&self.value(ctx));
+    }
+}
+
+impl <CTX,A> BoxedAccessorImpl<CTX,A> for ConstAccessor<A> {
+    fn with_value<'a>(&'a self, _ctx: &mut CTX, callback: Box<dyn FnOnce(&A) + 'a>) {
+        callback(&self.0);
+    }
+}
+
+pub trait Accessor<CTX, A> {
+    fn value<'a>(&'a self, ctx: &mut CTX) -> impl std::ops::Deref<Target=A> + 'a;
+}
+
+impl<CTX: HasFgrCtx + 'static, A: Send + Sync + 'static> Accessor<CTX, A> for Memo<CTX, A> {
+    fn value<'a>(&'a self, ctx: &mut CTX) -> impl std::ops::Deref<Target=A> + 'a {
+        self.value(ctx)
+    }
+}
+
+impl<CTX: HasFgrCtx + 'static, A: Send + Sync + 'static> Accessor<CTX, A> for Signal<CTX, A> {
+    fn value<'a>(&'a self, ctx: &mut CTX) -> impl std::ops::Deref<Target=A> + 'a {
+        self.value(ctx)
+    }
+}
+
+impl<CTX,A> Accessor<CTX,A> for ConstAccessor<A> {
+    fn value<'a>(&'a self, _ctx: &mut CTX) -> impl std::ops::Deref<Target=A> + 'a {
+        &*self.0
+    }
+}
+
+pub struct ConstAccessor<A>(Arc<A>);
+
+impl<A> Clone for ConstAccessor<A> {
+    fn clone(&self) -> Self {
+        Self(Arc::clone(&self.0))
+    }
+}
+
+impl<A> ConstAccessor<A> {
+    pub fn new(value: A) -> Self {
+        Self(Arc::new(value))
+    }
+}
+
 pub struct Memo<CTX, A> {
     impl_: Arc<RwLock<MemoImpl<CTX, A>>>,
 }

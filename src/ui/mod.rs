@@ -1,4 +1,5 @@
 mod check_box;
+mod text_box;
 mod ui_component;
 
 use std::sync::Arc;
@@ -9,6 +10,8 @@ use bevy::app::Update;
 use bevy::prelude::World;
 pub use check_box::CheckBox;
 pub use check_box::CheckBoxProps;
+pub use text_box::TextBox;
+pub use text_box::TextBoxProps;
 pub use ui_component::UiComponent;
 
 use crate::fgr::FgrCtx;

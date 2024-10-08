@@ -175,6 +175,7 @@ impl<CTX: HasFgrCtx + 'static> FgrCtx<CTX> {
     }
 }
 
+#[derive(Resource)]
 pub struct RootScope<CTX> {
     scope: Arc<RwLock<Vec<NodeRef<CTX>>>>,
 }

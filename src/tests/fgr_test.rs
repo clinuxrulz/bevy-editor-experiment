@@ -1,4 +1,4 @@
-use crate::{cloned, fgr::*};
+use bevy_editor_experiment_lib::{cloned, fgr::*};
 
 #[test]
 fn test_fgr() {

@@ -1,19 +1,20 @@
-use bevy::{prelude::*, winit::WinitSettings};
-use fgr::{print_graph, Signal, FgrExtensionMethods};
-use ui::UiComponent;
-
-pub mod fgr;
-pub mod ui;
+use bevy::{ecs::schedule::ScheduleLabel, prelude::*, winit::WinitSettings};
 
 #[cfg(test)]
 mod tests;
+
+use bevy_editor_experiment_lib::{
+    cloned,
+    fgr::{print_graph, FgrExtensionMethods, RootScope, Signal},
+    ui::{self, UiComponent},
+};
 
 fn main() {
     let mut app = App::new();
     app.add_plugins(DefaultPlugins)
         .insert_resource(WinitSettings::desktop_app())
         .add_systems(Startup, setup);
-    let mut scope = ui::render(
+    let scope = ui::render(
         &mut app,
         |world| {
             let checked = Signal::new(world, false);
@@ -32,8 +33,17 @@ fn main() {
             )
         }
     );
-    app.run();
-    scope.dispose(app.world_mut());
+    app.insert_resource(scope)
+        .add_systems(PostUpdate, |world: &mut World| {
+            let exit_event = world.get_resource_mut::<Events<AppExit>>().unwrap();
+            if !exit_event.is_empty() {
+                let scope = world.remove_resource::<RootScope<World>>();
+                if let Some(mut scope) = scope {
+                    scope.dispose(world);
+                }
+            }
+        })
+        .run();
 }
 
 fn setup(mut commands: Commands) {

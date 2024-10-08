@@ -3,6 +3,14 @@ name = "bevy-editor-experiment"
 version = "0.1.0"
 edition = "2021"
 
+[lib]
+name = "bevy_editor_experiment_lib"
+path = "src/lib.rs"
+
+[[bin]]
+name = "bevy-editor-experiment"
+path = "src/main.rs"
+
 [dependencies]
 bevy = "0.14.2"
 

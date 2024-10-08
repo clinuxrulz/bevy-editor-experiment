@@ -327,7 +327,7 @@ impl<CTX: HasFgrCtx + 'static, A: Send + Sync + 'static> Into<BoxedAccessor<CTX,
 }
 
 impl<CTX,A> BoxedAccessor<CTX,A> {
-    pub fn with_value<R:'static, CALLBACK: FnOnce(&A)->R + 'static>(&self, ctx: &mut CTX, callback: CALLBACK) -> R {
+    pub fn with_value<'a, R:'static, CALLBACK: FnOnce(&A)->R + 'a>(&'a self, ctx: &mut CTX, callback: CALLBACK) -> R {
         let mut result: Option<R> = None;
         self.0.with_value(ctx, Box::new(|a| {
             result = Some(callback(a));
@@ -377,6 +377,25 @@ impl<CTX: HasFgrCtx + 'static, A: Send + Sync + 'static> Accessor<CTX, A> for Si
 impl<CTX,A> Accessor<CTX,A> for ConstAccessor<A> {
     fn value<'a>(&'a self, _ctx: &mut CTX) -> impl std::ops::Deref<Target=A> + 'a {
         &*self.0
+    }
+}
+
+impl<CTX,A:'static> Accessor<CTX,A> for BoxedAccessor<CTX,A> {
+    fn value<'a>(&'a self, ctx: &mut CTX) -> impl std::ops::Deref<Target=A> + 'a {
+        struct MyRef<A> {
+            value: *const A,
+        }
+        impl<A> std::ops::Deref for MyRef<A> {
+            type Target = A;
+            fn deref(&self) -> &Self::Target {
+                unsafe { &*self.value }
+            }
+        }
+        let mut my_ref = MyRef { value: 0 as *const A };
+        self.with_value(ctx, |a| {
+            my_ref.value = a as *const A;
+        });
+        my_ref
     }
 }
 

@@ -1,4 +1,4 @@
-use bevy::{asset::Assets, color::{palettes::css::BLUE, Color}, prelude::{default, Entity, Mesh, Rectangle, World}, sprite::{ColorMaterial, MaterialMesh2dBundle, Mesh2dHandle}};
+use bevy::{color::palettes::css::BLUE, prelude::{default, BuildWorldChildren, Entity, NodeBundle, World}, ui::{Style, Val}};
 
 use crate::fgr::{BoxedAccessor, ConstAccessor};
 
@@ -37,22 +37,22 @@ impl TextBoxElement {
 
 impl Element for TextBoxElement {
     fn mount(&mut self, world: &mut World) {
-        let cursor;
-        {
-            let Some(mut meshes) = world.get_resource_mut::<Assets<Mesh>>() else { return; };
-            cursor = Mesh2dHandle(meshes.add(Rectangle::new(5.0, 50.0)));
-        }
-        let cursor_material;
-        {
-            let Some(mut materials) = world.get_resource_mut::<Assets<ColorMaterial>>() else { return; };
-            cursor_material = materials.add(Into::<Color>::into(BLUE));
-        }
-        let cursor_entity = world.spawn(MaterialMesh2dBundle {
-            mesh: cursor,
-            material: cursor_material,
-            ..default()
+        let mut cursor_entity: Option<Entity> = None;
+        let textbox_entity = world.spawn(NodeBundle { ..default() }).with_children(|parent| {
+            cursor_entity = Some(parent.spawn(NodeBundle {
+                style: Style {
+                    left: Val::Px(100.0),
+                    top: Val::Px(100.0),
+                    width: Val::Px(5.0),
+                    height: Val::Px(50.0),
+                    ..default()
+                },
+                background_color: BLUE.into(),
+                ..default()
+            }).id());
         }).id();
-        self.cursor_entity = Some(cursor_entity);
+        self.textbox_entity = Some(textbox_entity);
+        self.cursor_entity = cursor_entity;
     }
 
     fn unmount(&mut self, world: &mut World) {

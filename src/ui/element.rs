@@ -6,7 +6,7 @@ pub trait Element {
     fn update(&mut self, world: &mut World);
 }
 
-pub struct Elements(pub Vec<Box<dyn Element>>);
+pub struct Elements(pub Vec<Box<dyn Element + Send + Sync>>);
 
 impl Element for Elements {
     fn mount(&mut self, world: &mut World) {

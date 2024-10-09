@@ -6,7 +6,7 @@ mod tests;
 use bevy_editor_experiment_lib::{
     cloned,
     fgr::{print_graph, FgrExtensionMethods, RootScope, Signal},
-    ui,
+    ui::{self, Elements},
 };
 
 fn main() {
@@ -22,14 +22,19 @@ fn main() {
                 println!("checked = {}", *checked.value(world));
             }));
             print_graph((&checked).into());
-            ui::CheckBoxElement::new(
-                ui::CheckBoxProps {
-                    on_changed: Some(Box::new(cloned!((checked) => move |world, value| {
-                        checked.update_value(world, |old_value| *old_value = value);
-                        print_graph((&checked).into());
-                    }))),
-                },
-            )
+            Elements(vec![
+                Box::new(ui::CheckBoxElement::new(
+                    ui::CheckBoxProps {
+                        on_changed: Some(Box::new(cloned!((checked) => move |world, value| {
+                            checked.update_value(world, |old_value| *old_value = value);
+                            print_graph((&checked).into());
+                        }))),
+                    },
+                )),
+                Box::new(ui::TextBoxElement::new(ui::TextBoxProps {
+                    ..default()
+                }))
+            ])
         }
     );
     app.insert_resource(scope)

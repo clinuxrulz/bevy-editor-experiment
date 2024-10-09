@@ -306,7 +306,7 @@ impl<CTX: HasFgrCtx + 'static> IsNode<CTX> for EffectImpl<CTX> {
     }
 }
 
-pub struct BoxedAccessor<CTX, A>(Box<dyn BoxedAccessorImpl<CTX, A>>);
+pub struct BoxedAccessor<CTX, A>(Box<dyn BoxedAccessorImpl<CTX, A> + Send + Sync>);
 
 impl<CTX: HasFgrCtx + 'static, A: Send + Sync + 'static> Into<BoxedAccessor<CTX,A>> for Memo<CTX, A> {
     fn into(self) -> BoxedAccessor<CTX,A> {

@@ -4,9 +4,9 @@ use crate::fgr::{BoxedAccessor, ConstAccessor};
 
 use super::Element;
 pub struct TextBoxProps {
-    width: BoxedAccessor<World, f32>,
-    height: BoxedAccessor<World, f32>,
-    contents: BoxedAccessor<World, String>,
+    pub width: BoxedAccessor<World, f32>,
+    pub height: BoxedAccessor<World, f32>,
+    pub contents: BoxedAccessor<World, String>,
 }
 
 impl Default for TextBoxProps {
@@ -23,6 +23,16 @@ pub struct TextBoxElement {
     props: TextBoxProps,
     textbox_entity: Option<Entity>,
     cursor_entity: Option<Entity>,
+}
+
+impl TextBoxElement {
+    pub fn new(props: TextBoxProps) -> Self {
+        Self {
+            props,
+            textbox_entity: None,
+            cursor_entity: None,
+        }
+    }
 }
 
 impl Element for TextBoxElement {

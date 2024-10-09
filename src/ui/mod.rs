@@ -1,6 +1,6 @@
 mod check_box_element;
 mod element;
-mod text_box;
+mod text_box_element;
 mod ui_component;
 
 use std::sync::Arc;
@@ -13,7 +13,8 @@ use bevy::prelude::World;
 pub use check_box_element::CheckBoxElement;
 pub use check_box_element::CheckBoxProps;
 pub use element::{Element, Elements};
-pub use text_box::TextBoxProps;
+pub use text_box_element::TextBoxElement;
+pub use text_box_element::TextBoxProps;
 pub use ui_component::UiComponent;
 
 use crate::cloned;

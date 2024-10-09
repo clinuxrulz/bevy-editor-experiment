@@ -6,7 +6,7 @@ mod tests;
 use bevy_editor_experiment_lib::{
     cloned,
     fgr::{print_graph, FgrExtensionMethods, RootScope, Signal},
-    ui::{self, UiComponent},
+    ui,
 };
 
 fn main() {
@@ -22,8 +22,7 @@ fn main() {
                 println!("checked = {}", *checked.value(world));
             }));
             print_graph((&checked).into());
-            ui::CheckBox::execute(
-                world,
+            ui::CheckBoxElement::new(
                 ui::CheckBoxProps {
                     on_changed: Some(Box::new(cloned!((checked) => move |world, value| {
                         checked.update_value(world, |old_value| *old_value = value);

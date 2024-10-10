@@ -1,7 +1,5 @@
-use bevy::prelude::World;
-
-use super::Element;
+use bevy::prelude::{Entity, World};
 
 pub trait UiComponent<P> {
-    fn run(world: &mut World, props: P) -> Box<dyn Element + Send + Sync>;
+    fn run(world: &mut World, props: P) -> Entity;
 }

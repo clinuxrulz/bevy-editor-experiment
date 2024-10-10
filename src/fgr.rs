@@ -9,6 +9,7 @@ pub struct FgrCtx<CTX> {
     created_nodes: Vec<NodeRef<CTX>>,
     witness_observe: bool,
     observed_nodes: Vec<NodeRef<CTX>>,
+    update_flag_signal: Option<Signal<CTX,u32>>,
     stack: Vec<NodeRef<CTX>>,
     tmp_buffer_1: Vec<NodeRef<CTX>>,
     tmp_buffer_2: Vec<NodeRef<CTX>>,
@@ -31,6 +32,8 @@ pub trait FgrExtensionMethods {
     fn fgr_create_root<R, CALLBACK: FnOnce(&mut Self, RootScope<Self>) -> R>(&mut self, callback: CALLBACK) -> R;
     fn fgr_create_effect<CALLBACK: FnMut(&mut Self) + Send + Sync + 'static>(&mut self, callback: CALLBACK);
     fn fgr_on_cleanup<CALLBACK: FnMut(&mut Self) + Send + Sync + 'static>(&mut self, callback: CALLBACK);
+    fn fgr_on_update<CALLBACK: FnMut(&mut Self) + Send + Sync + 'static>(&mut self, callback: CALLBACK);
+    fn fgr_update(&mut self);
 }
 
 impl<CTX: HasFgrCtx + 'static> FgrExtensionMethods for CTX {
@@ -49,6 +52,14 @@ impl<CTX: HasFgrCtx + 'static> FgrExtensionMethods for CTX {
     fn fgr_on_cleanup<CALLBACK: FnMut(&mut Self) + Send + Sync + 'static>(&mut self, callback: CALLBACK) {
         FgrCtx::on_cleanup(self, callback)
     }
+
+    fn fgr_on_update<CALLBACK: FnMut(&mut Self) + Send + Sync + 'static>(&mut self, callback: CALLBACK) {
+        FgrCtx::on_update(self, callback)
+    }
+
+    fn fgr_update(&mut self) {
+        FgrCtx::update(self);
+    }
 }
 
 impl<CTX: HasFgrCtx + 'static> FgrCtx<CTX> {
@@ -65,6 +76,7 @@ impl<CTX: HasFgrCtx + 'static> FgrCtx<CTX> {
             created_nodes: Vec::new(),
             witness_observe: false,
             observed_nodes: Vec::new(),
+            update_flag_signal: None,
             stack: Vec::new(),
             tmp_buffer_1: Vec::new(),
             tmp_buffer_2: Vec::new(),
@@ -172,6 +184,28 @@ impl<CTX: HasFgrCtx + 'static> FgrCtx<CTX> {
             node: Arc::clone(&impl_),
         };
         ctx.fgr_ctx().created_nodes.push(node.clone());
+    }
+
+    pub fn on_update(ctx: &mut CTX, mut callback: impl FnMut(&mut CTX) + Send + Sync + 'static) {
+        if !ctx.fgr_ctx().witness_created {
+            panic!("on_update created outside of scope. Did you forget to call create_root()?");
+        }
+        let update_flag_signal: Option<Signal<CTX, u32>> = ctx.fgr_ctx().update_flag_signal.clone();
+        let update_flag_signal_2: Signal<CTX, u32>;
+        if let Some(x) = &update_flag_signal {
+            update_flag_signal_2 = x.clone();
+        } else {
+            update_flag_signal_2 = Signal::new(ctx, 0);
+        }
+        FgrCtx::create_effect(ctx, move |ctx: &mut CTX| {
+            let _ = *update_flag_signal_2.value(ctx);
+            callback(ctx);
+        });
+    }
+
+    pub fn update(ctx: &mut CTX) {
+        let Some(mut update_flag_signal) = ctx.fgr_ctx().update_flag_signal.clone() else { return; };
+        update_flag_signal.update_value(ctx, |x| *x = 1 - *x);
     }
 }
 

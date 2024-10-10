@@ -2,7 +2,6 @@ use bevy::{color::palettes::css::BLUE, prelude::{default, BuildWorldChildren, En
 
 use crate::fgr::{BoxedAccessor, ConstAccessor};
 
-use super::Element;
 pub struct TextBoxProps {
     pub width: BoxedAccessor<World, f32>,
     pub height: BoxedAccessor<World, f32>,

@@ -196,6 +196,7 @@ impl<CTX: HasFgrCtx + 'static> FgrCtx<CTX> {
             update_flag_signal_2 = x.clone();
         } else {
             update_flag_signal_2 = Signal::new(ctx, 0);
+            ctx.fgr_ctx().update_flag_signal = Some(update_flag_signal_2.clone());
         }
         FgrCtx::create_effect(ctx, move |ctx: &mut CTX| {
             let _ = *update_flag_signal_2.value(ctx);

@@ -53,6 +53,9 @@ impl UiComponent<CheckBoxProps> for CheckBox {
                 }
             )
             .id();
+        world.fgr_on_mount(|ctx| {
+            println!("checkbox mounted");
+        });
         world.fgr_on_cleanup(move |world| {
             world.despawn(checkbox_id);
         });

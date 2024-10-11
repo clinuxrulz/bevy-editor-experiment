@@ -1,6 +1,7 @@
 use std::{ops::DerefMut, sync::{Arc, RwLock, RwLockReadGuard}};
 
 use bevy::prelude::{Resource, World};
+use crate::cloned;
 
 const DEBUG_LOG: bool = false;
 
@@ -36,6 +37,26 @@ pub trait FgrExtensionMethods {
     fn fgr_on_cleanup<CALLBACK: FnMut(&mut Self) + Send + Sync + 'static>(&mut self, callback: CALLBACK);
     fn fgr_on_update<CALLBACK: FnMut(&mut Self) + Send + Sync + 'static>(&mut self, callback: CALLBACK);
     fn fgr_update(&mut self);
+
+    fn fgr_on_mount<CALLBACK: FnOnce(&mut Self) + Send + Sync + 'static>(&mut self, callback: CALLBACK) where Self: HasFgrCtx + Send + Sync + 'static {
+        // must happen after the layout manager of bevy ui has run
+        let first = Signal::new(self, true);
+        let mut callback2 = Some(callback);
+        Memo::new_no_diff(self, move |ctx| {
+            if !*first.value(ctx) {
+                return;
+            }
+            let mut callback3 = None;
+            std::mem::swap(&mut callback3, &mut callback2);
+            ctx.fgr_on_update(cloned!((first) => move |ctx| {
+                let mut callback4 = None;
+                std::mem::swap(&mut callback4, &mut callback3);
+                let Some(callback5) = callback4 else { return; };
+                callback5(ctx);
+                first.update_value(ctx, |x| *x = false);
+            }));
+        });
+    }
 }
 
 impl<CTX: HasFgrCtx + 'static> FgrExtensionMethods for CTX {

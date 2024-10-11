@@ -20,7 +20,6 @@ impl Default for CheckBoxProps {
 
 struct CheckBoxState {
     pub props: CheckBoxProps,
-    pub checkbox_entity: Option<Entity>,
     pub last_interaction: Interaction,
     pub checked: bool,
 }
@@ -29,7 +28,6 @@ impl CheckBoxState {
     fn new(props: CheckBoxProps) -> Self {
         Self {
             props,
-            checkbox_entity: None,
             last_interaction: Interaction::None,
             checked: false,
         }
@@ -60,8 +58,7 @@ impl UiComponent<CheckBoxProps> for CheckBox {
         });
         world.fgr_on_update(move |world| {
             let mut state = state.write().unwrap();
-            let entity = state.checkbox_entity;
-            let Some(entity) = entity else { return; };
+            let entity = checkbox_id;
             let Some(interaction) = world.get::<Interaction>(entity) else { return; };
             if *interaction == state.last_interaction {
                 return;

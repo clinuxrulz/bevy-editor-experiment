@@ -2,6 +2,8 @@ use std::{ops::DerefMut, sync::{Arc, RwLock, RwLockReadGuard}};
 
 use bevy::prelude::{Resource, World};
 
+const DEBUG_LOG: bool = false;
+
 #[derive(Resource)]
 pub struct FgrCtx<CTX> {
     next_id: u64,
@@ -328,7 +330,9 @@ impl<CTX: HasFgrCtx + 'static> IsNode<CTX> for EffectImpl<CTX> {
 
     fn dispose(&mut self, _ctx: &mut CTX) {
         //
-        println!("dispose node {:}", self.node_data.id);
+        if DEBUG_LOG {
+            println!("dispose node {:}", self.node_data.id);
+        }
         //
         for dependency in self.node_data.dependencies.drain(..) {
             dependency.with_node_mut(|node| {
@@ -588,7 +592,9 @@ impl<CTX: HasFgrCtx, A> IsNode<CTX> for MemoImpl<CTX,A> {
 
     fn dispose(&mut self, ctx: &mut CTX) {
         //
-        println!("dispose node {}", self.node_data.id);
+        if DEBUG_LOG {
+            println!("dispose node {}", self.node_data.id);
+        }
         //
         for dependency in self.node_data.dependencies.drain(..) {
             dependency.with_node_mut(|node| {
@@ -715,7 +721,9 @@ impl<CTX: HasFgrCtx + 'static, A: Send + Sync + 'static> Signal<CTX, A> {
 
     pub fn update_value<CALLBACK: FnOnce(&mut A)>(&mut self, ctx: &mut CTX, callback: CALLBACK) {
         //
-        println!("Signal::update_value called on {:?}", (Into::<NodeRef<CTX>>::into(&*self)));
+        if DEBUG_LOG {
+            println!("Signal::update_value called on {:?}", (Into::<NodeRef<CTX>>::into(&*self)));
+        }
         //
         ctx.fgr_batch(|ctx| {
             {
@@ -804,15 +812,21 @@ fn update_graph<CTX: HasFgrCtx>(ctx: &mut CTX) {
     std::mem::swap(&mut ctx.fgr_ctx().tmp_buffer_2, &mut tmp_buffer_2);
     std::mem::swap(&mut ctx.fgr_ctx().stack, &mut stack);
     //
-    println!("update_graph: {} nodes", stack.len());
+    if DEBUG_LOG {
+        println!("update_graph: {} nodes", stack.len());
+    }
     //
     loop {
         let Some(node) = stack.pop() else { break; };
         //
-        println!("at node {:?}", node);
+        if DEBUG_LOG {
+            println!("at node {:?}", node);
+        }
         //
         let flag = node.with_node(|n| n.node_data().flag);
-        println!("  flag: {:?}", flag);
+        if DEBUG_LOG {
+            println!("  flag: {:?}", flag);
+        }
         match flag {
             NodeFlag::Ready => { /* do nothing */ },
             NodeFlag::Stale => {
@@ -844,7 +858,9 @@ fn update_graph<CTX: HasFgrCtx>(ctx: &mut CTX) {
                 }
                 tmp_buffer_2.clear();
                 if !has_stale_dependencies && (any_dependencies_changed || is_source) {
-                    println!("  update node {:?}", node);
+                    if DEBUG_LOG {
+                        println!("  update node {:?}", node);
+                    }
                     let node2 = node.clone();
                     let changed = node.with_node_mut(|n| {
                         if !(is_source || is_sink) {
@@ -882,7 +898,9 @@ fn update_graph<CTX: HasFgrCtx>(ctx: &mut CTX) {
                         }
                         let n2 = n.node_data_mut();
                         n2.changed = changed;
-                        println!("  changed = {}", changed);
+                        if DEBUG_LOG {
+                            println!("  changed = {}", changed);
+                        }
                         n2.flag = NodeFlag::Ready;
                         for dep in &n.node_data().dependents {
                             stack.push(dep.clone());
@@ -903,7 +921,9 @@ fn update_graph<CTX: HasFgrCtx>(ctx: &mut CTX) {
         });
     }
     //
-    println!("update_graph finished.");
+    if DEBUG_LOG {
+        println!("update_graph finished.");
+    }
     //
     let mut deferred_effects = Vec::new();
     std::mem::swap(&mut ctx.fgr_ctx().defered_effects, &mut deferred_effects);
@@ -923,7 +943,9 @@ fn propergate_dependents_flags_to_stale<CTX: HasFgrCtx + 'static>(ctx: &mut CTX)
         });
         let fgr_ctx = &mut *ctx.fgr_ctx();
         for dep in fgr_ctx.tmp_buffer_1.drain(..) {
-            println!("  dep: {:?} marked stale", dep);
+            if DEBUG_LOG {
+                println!("  dep: {:?} marked stale", dep);
+            }
             dep.with_node_mut(|n| n.node_data_mut().flag = NodeFlag::Stale);
             fgr_ctx.stack.push(dep);
         }

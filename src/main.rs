@@ -21,13 +21,13 @@ fn main() {
             world.fgr_create_effect(cloned!((checked) => move |world| {
                 println!("checked = {}", *checked.value(world));
             }));
-            print_graph((&checked).into());
+            //print_graph((&checked).into());
             ui::CheckBox::run(
                 world,
                 ui::CheckBoxProps {
                     on_changed: Some(Box::new(cloned!((checked) => move |world, value| {
                         checked.update_value(world, |old_value| *old_value = value);
-                        print_graph((&checked).into());
+                        //print_graph((&checked).into());
                     }))),
                 },
             )

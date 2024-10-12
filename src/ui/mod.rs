@@ -1,5 +1,5 @@
 mod check_box;
-//mod text_box;
+mod text_box;
 mod ui_component;
 
 use bevy::app::App;
@@ -8,8 +8,8 @@ use bevy::prelude::Entity;
 use bevy::prelude::World;
 pub use check_box::CheckBox;
 pub use check_box::CheckBoxProps;
-//pub use text_box::TextBoxElement;
-//pub use text_box::TextBoxProps;
+pub use text_box::TextBox;
+pub use text_box::TextBoxProps;
 pub use ui_component::UiComponent;
 
 use crate::fgr::FgrCtx;

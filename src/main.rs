@@ -22,15 +22,26 @@ fn main() {
                 println!("checked = {}", *checked.value(world));
             }));
             //print_graph((&checked).into());
-            ui::CheckBox::run(
-                world,
-                ui::CheckBoxProps {
-                    on_changed: Some(Box::new(cloned!((checked) => move |world, value| {
-                        checked.update_value(world, |old_value| *old_value = value);
-                        //print_graph((&checked).into());
-                    }))),
-                },
-            )
+            let children = [
+                ui::CheckBox::run(
+                    world,
+                    ui::CheckBoxProps {
+                        on_changed: Some(Box::new(cloned!((checked) => move |world, value| {
+                            checked.update_value(world, |old_value| *old_value = value);
+                            //print_graph((&checked).into());
+                        }))),
+                    },
+                ),
+                ui::TextBox::run(
+                    world,
+                    ui::TextBoxProps {
+                        ..Default::default()
+                    }
+                ),
+            ];
+            let mut entity = world.spawn(NodeBundle { ..default() });
+            entity.push_children(&children);
+            return entity.id();
         }
     );
     app.insert_resource(scope)

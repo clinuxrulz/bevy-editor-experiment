@@ -1,6 +1,10 @@
 use bevy::{color::palettes::css::BLUE, prelude::{default, BuildWorldChildren, Entity, NodeBundle, World}, ui::{Style, Val}};
+use std::sync::Arc;
+use std::sync::RwLock;
 
 use crate::fgr::{BoxedAccessor, ConstAccessor};
+
+use super::UiComponent;
 
 pub struct TextBoxProps {
     pub width: BoxedAccessor<World, f32>,
@@ -18,48 +22,34 @@ impl Default for TextBoxProps {
     }
 }
 
-pub struct TextBoxElement {
-    props: TextBoxProps,
-    textbox_entity: Option<Entity>,
-    cursor_entity: Option<Entity>,
+pub struct TextBox;
+
+struct TextBoxState {
 }
 
-impl TextBoxElement {
-    pub fn new(props: TextBoxProps) -> Self {
-        Self {
-            props,
-            textbox_entity: None,
-            cursor_entity: None,
-        }
-    }
-}
-
-impl Element for TextBoxElement {
-    fn mount(&mut self, world: &mut World) {
-        let mut cursor_entity: Option<Entity> = None;
-        let textbox_entity = world.spawn(NodeBundle { ..default() }).with_children(|parent| {
-            cursor_entity = Some(parent.spawn(NodeBundle {
-                style: Style {
-                    left: Val::Px(100.0),
-                    top: Val::Px(100.0),
-                    width: Val::Px(5.0),
-                    height: Val::Px(50.0),
+impl UiComponent<TextBoxProps> for TextBox {
+    fn run(world: &mut World, props: TextBoxProps) -> Entity {
+        let state = Arc::new(RwLock::new(TextBoxState {}));
+        let textbox_id = world
+            .spawn(
+                NodeBundle {
+                    ..Default::default()
+                }
+            )
+            .with_children(|parent| {
+                parent.spawn(NodeBundle {
+                    style: Style {
+                        left: Val::Px(100.0),
+                        top: Val::Px(100.0),
+                        width: Val::Px(5.0),
+                        height: Val::Px(50.0),
+                        ..default()
+                    },
+                    background_color: BLUE.into(),
                     ..default()
-                },
-                background_color: BLUE.into(),
-                ..default()
-            }).id());
-        }).id();
-        self.textbox_entity = Some(textbox_entity);
-        self.cursor_entity = cursor_entity;
-    }
-
-    fn unmount(&mut self, world: &mut World) {
-        if let Some(cursor_entity) = self.cursor_entity {
-            world.despawn(cursor_entity);
-        }
-    }
-
-    fn update(&mut self, world: &mut World) {
+                });
+            })
+            .id();
+        return textbox_id;
     }
 }

@@ -1,4 +1,4 @@
-use bevy::{asset::AssetServer, color::{palettes::css::BLUE, Color}, input::{keyboard::KeyboardInput, ButtonInput}, prelude::{default, BuildWorldChildren, DespawnRecursiveExt, Entity, EventReader, Events, KeyCode, NodeBundle, TextBundle, World}, text::{Text, TextStyle}, ui::{Overflow, Style, Val}};
+use bevy::{asset::AssetServer, color::{palettes::css::BLUE, Color}, ecs::event::ManualEventReader, input::{keyboard::{Key, KeyboardInput}, ButtonInput}, prelude::{default, BuildWorldChildren, DespawnRecursiveExt, Entity, EventReader, Events, KeyCode, NodeBundle, TextBundle, World}, text::{Text, TextStyle}, ui::{Overflow, Style, Val}, utils::tracing::Event, window::ReceivedCharacter};
 use std::{borrow::{Borrow, BorrowMut}, str::FromStr, sync::Arc};
 use std::sync::RwLock;
 
@@ -25,13 +25,22 @@ impl Default for TextBoxProps {
 pub struct TextBox;
 
 struct TextBoxState {
+    event_reader: ManualEventReader<KeyboardInput>,
 }
 
 impl UiComponent<TextBoxProps> for TextBox {
     fn run(world: &mut World, props: TextBoxProps) -> Entity {
-        let state = Arc::new(RwLock::new(TextBoxState {}));
+        let state = Arc::new(RwLock::new(TextBoxState {
+            event_reader: ManualEventReader::default(),
+        }));
         let cursor_pos = Signal::new(world, 0);
-        let contents = props.contents;
+        let init_contents = world.fgr_untrack(|world| props.contents.value(world).clone());
+        let contents = Signal::new(world, init_contents);
+        let props_contents = props.contents;
+        Memo::new(world, cloned!((props_contents, contents) => move |world| {
+            let props_contents = props_contents.value(world).clone();
+            contents.update_value(world, |x| *x = props_contents);
+        }));
         let contents_length = Memo::new(world, cloned!((contents) => move |world| contents.value(world).len()));
         let cursor_pos_clamped = Memo::new(world, cloned!((cursor_pos, contents_length) => move |world| {
             let cursor_pos = *cursor_pos.value(world);
@@ -128,7 +137,7 @@ impl UiComponent<TextBoxProps> for TextBox {
         world.fgr_on_cleanup(cloned!((textbox_id) => move |world| {
             world.entity_mut(textbox_id).despawn_recursive();
         }));
-        world.fgr_on_update(cloned!((cursor_pos, cursor_pos_clamped, contents_length) => move |world| {
+        world.fgr_on_update(cloned!((cursor_pos, cursor_pos_clamped, contents_length, contents) => move |world| {
             let cursor_pos_2 = *cursor_pos_clamped.value(world);
             let contents_length = *contents_length.value(world);
             //let keyboard_input = world.get_resource::<Events<KeyboardInput>>().unwrap();
@@ -163,6 +172,25 @@ impl UiComponent<TextBoxProps> for TextBox {
             }
             if new_cursor_pos != cursor_pos_2 {
                 cursor_pos.update_value(world, |x| *x = new_cursor_pos);
+            }
+            let mut state = state.write().unwrap();
+            let keyboard_input_events = world.get_resource::<Events<KeyboardInput>>().unwrap();
+            for event in state.event_reader.read(&keyboard_input_events) {
+                match &event.logical_key {
+                    Key::Character(c) => {
+                        if c.len() == 1 {
+                            let c = c.chars().nth(0).unwrap();
+                            contents.update_value(world, |x| {
+                                *x = x[0..new_cursor_pos].to_string() + &c.to_string() + &x[new_cursor_pos..];
+                            });
+                            new_cursor_pos += 1;
+                            cursor_pos.update_value(world, |x| *x = new_cursor_pos);
+                            println!("char: {}", c);
+                            break;
+                        }
+                    }
+                    _ => {}
+                }
             }
         }));
         return textbox_id;

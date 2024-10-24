@@ -1,4 +1,4 @@
-use bevy::{asset::AssetServer, color::{palettes::css::BLUE, Color}, input::keyboard::KeyboardInput, prelude::{default, BuildWorldChildren, Entity, EventReader, Events, KeyCode, NodeBundle, TextBundle, World}, text::{Text, TextStyle}, ui::{Style, Val}};
+use bevy::{asset::AssetServer, color::{palettes::css::BLUE, Color}, input::keyboard::KeyboardInput, prelude::{default, BuildWorldChildren, DespawnRecursiveExt, Entity, EventReader, Events, KeyCode, NodeBundle, TextBundle, World}, text::{Text, TextStyle}, ui::{Style, Val}};
 use std::{borrow::{Borrow, BorrowMut}, str::FromStr, sync::Arc};
 use std::sync::RwLock;
 
@@ -108,6 +108,9 @@ impl UiComponent<TextBoxProps> for TextBox {
                 contents_after_id,
             ])
             .id();
+        world.fgr_on_cleanup(cloned!((textbox_id) => move |world| {
+            world.entity_mut(textbox_id).despawn_recursive();
+        }));
         world.fgr_on_update(cloned!((cursor_pos, contents_length) => move |world| {
             let cursor_pos_2 = world.fgr_untrack(|world| *cursor_pos.value(world));
             let contents_length = world.fgr_untrack(|world| *contents_length.value(world));

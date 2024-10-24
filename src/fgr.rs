@@ -114,8 +114,10 @@ impl<CTX: HasFgrCtx + 'static> FgrCtx<CTX> {
     }
 
     pub fn untrack<R, CALLBACK: FnOnce(&mut CTX) -> R>(ctx: &mut CTX, callback: CALLBACK) -> R {
+        let mut tmp = Vec::new();
+        std::mem::swap(&mut ctx.fgr_ctx().observed_nodes, &mut tmp);
         let result = callback(ctx);
-        ctx.fgr_ctx().observed_nodes.clear();
+        std::mem::swap(&mut ctx.fgr_ctx().observed_nodes, &mut tmp);
         result
     }
 

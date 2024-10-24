@@ -236,7 +236,7 @@ impl<CTX: HasFgrCtx + 'static> FgrCtx<CTX> {
         }
         FgrCtx::create_effect(ctx, move |ctx: &mut CTX| {
             let _ = *update_flag_signal_2.value(ctx);
-            callback(ctx);
+            FgrCtx::untrack(ctx, |ctx| callback(ctx));
         });
     }
 

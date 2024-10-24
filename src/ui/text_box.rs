@@ -1,4 +1,4 @@
-use bevy::{asset::AssetServer, color::{palettes::css::BLUE, Color}, input::keyboard::KeyboardInput, prelude::{default, BuildWorldChildren, DespawnRecursiveExt, Entity, EventReader, Events, KeyCode, NodeBundle, TextBundle, World}, text::{Text, TextStyle}, ui::{Overflow, Style, Val}};
+use bevy::{asset::AssetServer, color::{palettes::css::BLUE, Color}, input::{keyboard::KeyboardInput, ButtonInput}, prelude::{default, BuildWorldChildren, DespawnRecursiveExt, Entity, EventReader, Events, KeyCode, NodeBundle, TextBundle, World}, text::{Text, TextStyle}, ui::{Overflow, Style, Val}};
 use std::{borrow::{Borrow, BorrowMut}, str::FromStr, sync::Arc};
 use std::sync::RwLock;
 
@@ -124,25 +124,37 @@ impl UiComponent<TextBoxProps> for TextBox {
             world.entity_mut(textbox_id).despawn_recursive();
         }));
         world.fgr_on_update(cloned!((cursor_pos, contents_length) => move |world| {
-            let cursor_pos_2 = world.fgr_untrack(|world| *cursor_pos.value(world));
-            let contents_length = world.fgr_untrack(|world| *contents_length.value(world));
-            let keyboard_input = world.get_resource::<Events<KeyboardInput>>().unwrap();
-            let mut reader = keyboard_input.get_reader();
+            let cursor_pos_2 = *cursor_pos.value(world);
+            let contents_length = *contents_length.value(world);
+            //let keyboard_input = world.get_resource::<Events<KeyboardInput>>().unwrap();
+            //let mut reader = keyboard_input.get_reader();
             let mut new_cursor_pos = cursor_pos_2;
-            for x in reader.read(&keyboard_input) {
-                match x.key_code {
-                    KeyCode::ArrowLeft => {
-                        if new_cursor_pos > 0 {
-                            new_cursor_pos -= 1;
-                        }
-                    }
-                    KeyCode::ArrowRight => {
-                        if new_cursor_pos < contents_length {
-                            new_cursor_pos += 1;
-                        }
-                    }
-                    _ => {}
+            enum LeftOrRight {
+                Left,
+                Right
+            }
+            let mut move_cursor: Option<LeftOrRight> = None;
+            {
+                let keys = world.resource::<ButtonInput<KeyCode>>();
+                if keys.just_pressed(KeyCode::ArrowLeft) {
+                    move_cursor = Some(LeftOrRight::Left);
                 }
+                if keys.just_pressed(KeyCode::ArrowRight) {
+                    move_cursor = Some(LeftOrRight::Right);
+                }
+            }
+            match move_cursor {
+                Some(LeftOrRight::Left) => {
+                    if cursor_pos_2 > 0 {
+                        new_cursor_pos = cursor_pos_2 - 1;
+                    }
+                }
+                Some(LeftOrRight::Right) => {
+                    if cursor_pos_2 < contents_length {
+                        new_cursor_pos = cursor_pos_2 + 1;
+                    }
+                }
+                None => {}
             }
             if new_cursor_pos != cursor_pos_2 {
                 cursor_pos.update_value(world, |x| *x = new_cursor_pos);

@@ -33,8 +33,13 @@ impl UiComponent<TextBoxProps> for TextBox {
         let cursor_pos = Signal::new(world, 0);
         let contents = props.contents;
         let contents_length = Memo::new(world, cloned!((contents) => move |world| contents.value(world).len()));
-        let contents_before_after_cursor = Memo::new(world, cloned!((cursor_pos, contents) => move |world| {
+        let cursor_pos_clamped = Memo::new(world, cloned!((cursor_pos, contents_length) => move |world| {
             let cursor_pos = *cursor_pos.value(world);
+            let contents_length = *contents_length.value(world);
+            return cursor_pos.clamp(0, contents_length);
+        }));
+        let contents_before_after_cursor = Memo::new(world, cloned!((cursor_pos_clamped, contents) => move |world| {
+            let cursor_pos = *cursor_pos_clamped.value(world);
             let contents = &*contents.value(world);
             let before = Arc::new(String::from_str(&contents[0..cursor_pos]).unwrap());
             let after = Arc::new(String::from_str(&contents[cursor_pos..]).unwrap());
@@ -123,8 +128,8 @@ impl UiComponent<TextBoxProps> for TextBox {
         world.fgr_on_cleanup(cloned!((textbox_id) => move |world| {
             world.entity_mut(textbox_id).despawn_recursive();
         }));
-        world.fgr_on_update(cloned!((cursor_pos, contents_length) => move |world| {
-            let cursor_pos_2 = *cursor_pos.value(world);
+        world.fgr_on_update(cloned!((cursor_pos, cursor_pos_clamped, contents_length) => move |world| {
+            let cursor_pos_2 = *cursor_pos_clamped.value(world);
             let contents_length = *contents_length.value(world);
             //let keyboard_input = world.get_resource::<Events<KeyboardInput>>().unwrap();
             //let mut reader = keyboard_input.get_reader();

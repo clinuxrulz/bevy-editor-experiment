@@ -31,6 +31,7 @@ impl HasFgrCtx for World {
 }
 
 pub trait FgrExtensionMethods {
+    fn fgr_untrack<R, CALLBACK: FnOnce(&mut Self) -> R>(&mut self, callback: CALLBACK) -> R;
     fn fgr_batch<R, CALLBACK: FnOnce(&mut Self) -> R>(&mut self, callback: CALLBACK) -> R;
     fn fgr_create_root<R, CALLBACK: FnOnce(&mut Self, RootScope<Self>) -> R>(&mut self, callback: CALLBACK) -> R;
     fn fgr_create_effect<CALLBACK: FnMut(&mut Self) + Send + Sync + 'static>(&mut self, callback: CALLBACK);
@@ -60,6 +61,10 @@ pub trait FgrExtensionMethods {
 }
 
 impl<CTX: HasFgrCtx + 'static> FgrExtensionMethods for CTX {
+    fn fgr_untrack<R, CALLBACK: FnOnce(&mut Self) -> R>(&mut self, callback: CALLBACK) -> R {
+        FgrCtx::untrack(self, callback)
+    }
+
     fn fgr_batch<R, CALLBACK: FnOnce(&mut Self) -> R>(&mut self, callback: CALLBACK) -> R {
         FgrCtx::batch(self, callback)
     }
@@ -106,6 +111,12 @@ impl<CTX: HasFgrCtx + 'static> FgrCtx<CTX> {
             transaction_level: 0,
             defered_effects: Vec::new(),
         }
+    }
+
+    pub fn untrack<R, CALLBACK: FnOnce(&mut CTX) -> R>(ctx: &mut CTX, callback: CALLBACK) -> R {
+        let result = callback(ctx);
+        ctx.fgr_ctx().observed_nodes.clear();
+        result
     }
 
     pub fn batch<R, CALLBACK: FnOnce(&mut CTX) -> R>(ctx: &mut CTX, callback: CALLBACK) -> R {

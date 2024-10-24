@@ -109,8 +109,8 @@ impl UiComponent<TextBoxProps> for TextBox {
             ])
             .id();
         world.fgr_on_update(cloned!((cursor_pos, contents_length) => move |world| {
-            let cursor_pos_2 = *cursor_pos.value(world);
-            let contents_length = *contents_length.value(world);
+            let cursor_pos_2 = world.fgr_untrack(|world| *cursor_pos.value(world));
+            let contents_length = world.fgr_untrack(|world| *contents_length.value(world));
             let keyboard_input = world.get_resource::<Events<KeyboardInput>>().unwrap();
             let mut reader = keyboard_input.get_reader();
             let mut new_cursor_pos = cursor_pos_2;

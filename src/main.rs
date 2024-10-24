@@ -5,7 +5,7 @@ mod tests;
 
 use bevy_editor_experiment_lib::{
     cloned,
-    fgr::{print_graph, FgrExtensionMethods, RootScope, Signal},
+    fgr::{print_graph, ConstAccessor, FgrExtensionMethods, RootScope, Signal},
     ui::{self, UiComponent},
 };
 
@@ -35,6 +35,7 @@ fn main() {
                 ui::TextBox::run(
                     world,
                     ui::TextBoxProps {
+                        contents: ConstAccessor::new("testing textbox".into()).into(),
                         ..Default::default()
                     }
                 ),

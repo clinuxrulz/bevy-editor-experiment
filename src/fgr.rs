@@ -366,23 +366,29 @@ impl<CTX: HasFgrCtx + 'static> IsNode<CTX> for EffectImpl<CTX> {
     }
 }
 
-pub struct BoxedAccessor<CTX, A>(Box<dyn BoxedAccessorImpl<CTX, A> + Send + Sync>);
+pub struct BoxedAccessor<CTX, A>(Arc<dyn BoxedAccessorImpl<CTX, A> + Send + Sync>);
 
 impl<CTX: HasFgrCtx + 'static, A: Send + Sync + 'static> Into<BoxedAccessor<CTX,A>> for Memo<CTX, A> {
     fn into(self) -> BoxedAccessor<CTX,A> {
-        BoxedAccessor(Box::new(self.clone()))
+        BoxedAccessor(Arc::new(self.clone()))
     }
 }
 
 impl<CTX: HasFgrCtx + 'static, A: Send + Sync + 'static> Into<BoxedAccessor<CTX,A>> for Signal<CTX, A> {
     fn into(self) -> BoxedAccessor<CTX,A> {
-        BoxedAccessor(Box::new(self.clone()))
+        BoxedAccessor(Arc::new(self.clone()))
     }
 }
 
 impl<CTX: HasFgrCtx + 'static, A: Send + Sync + 'static> Into<BoxedAccessor<CTX,A>> for ConstAccessor<A> {
     fn into(self) -> BoxedAccessor<CTX,A> {
-        BoxedAccessor(Box::new(self.clone()))
+        BoxedAccessor(Arc::new(self.clone()))
+    }
+}
+
+impl<CTX, A> Clone for BoxedAccessor<CTX, A> {
+    fn clone(&self) -> Self {
+        Self(Arc::clone(&self.0))
     }
 }
 

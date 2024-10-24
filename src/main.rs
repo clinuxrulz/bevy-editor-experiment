@@ -51,7 +51,8 @@ fn main() {
             if !exit_event.is_empty() {
                 let scope = world.remove_resource::<RootScope<World>>();
                 if let Some(mut scope) = scope {
-                    scope.dispose(world);
+                    // causing lock-up on exit at the moment
+                    //scope.dispose(world);
                 }
             }
         })

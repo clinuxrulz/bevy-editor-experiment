@@ -140,43 +140,25 @@ impl UiComponent<TextBoxProps> for TextBox {
         world.fgr_on_update(cloned!((cursor_pos, cursor_pos_clamped, contents_length, contents) => move |world| {
             let cursor_pos_2 = *cursor_pos_clamped.value(world);
             let contents_length = *contents_length.value(world);
-            //let keyboard_input = world.get_resource::<Events<KeyboardInput>>().unwrap();
-            //let mut reader = keyboard_input.get_reader();
             let mut new_cursor_pos = cursor_pos_2;
-            enum LeftOrRight {
-                Left,
-                Right
-            }
-            let mut move_cursor: Option<LeftOrRight> = None;
-            {
-                let keys = world.resource::<ButtonInput<KeyCode>>();
-                if keys.just_pressed(KeyCode::ArrowLeft) {
-                    move_cursor = Some(LeftOrRight::Left);
-                }
-                if keys.just_pressed(KeyCode::ArrowRight) {
-                    move_cursor = Some(LeftOrRight::Right);
-                }
-            }
-            match move_cursor {
-                Some(LeftOrRight::Left) => {
-                    if cursor_pos_2 > 0 {
-                        new_cursor_pos = cursor_pos_2 - 1;
-                    }
-                }
-                Some(LeftOrRight::Right) => {
-                    if cursor_pos_2 < contents_length {
-                        new_cursor_pos = cursor_pos_2 + 1;
-                    }
-                }
-                None => {}
-            }
-            if new_cursor_pos != cursor_pos_2 {
-                cursor_pos.update_value(world, |x| *x = new_cursor_pos);
-            }
             let mut state = state.write().unwrap();
             let keyboard_input_events = world.get_resource::<Events<KeyboardInput>>().unwrap();
             for event in state.event_reader.read(&keyboard_input_events) {
                 match &event.logical_key {
+                    Key::ArrowLeft => {
+                        if new_cursor_pos > 0 {
+                            new_cursor_pos -= 1;
+                            cursor_pos.update_value(world, |x| *x = new_cursor_pos);
+                        }
+                        break;
+                    }
+                    Key::ArrowRight => {
+                        if new_cursor_pos < contents_length {
+                            new_cursor_pos += 1;
+                            cursor_pos.update_value(world, |x| *x = new_cursor_pos);
+                        }
+                        break;
+                    }
                     Key::Character(c) => {
                         if c.len() == 1 {
                             let c = c.chars().nth(0).unwrap();
@@ -186,8 +168,19 @@ impl UiComponent<TextBoxProps> for TextBox {
                             new_cursor_pos += 1;
                             cursor_pos.update_value(world, |x| *x = new_cursor_pos);
                             println!("char: {}", c);
-                            break;
                         }
+                        break;
+                    }
+                    Key::Backspace => {
+                        if new_cursor_pos > 0 {
+                            contents.update_value(world, |x| {
+                                *x = x[0..new_cursor_pos-1].to_string() + &x[new_cursor_pos..];
+                            });
+                            new_cursor_pos -= 1;
+                            cursor_pos.update_value(world, |x| *x = new_cursor_pos);
+                            println!("backspace");
+                        }
+                        break;
                     }
                     _ => {}
                 }

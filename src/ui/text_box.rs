@@ -33,7 +33,8 @@ impl UiComponent<TextBoxProps> for TextBox {
         let state = Arc::new(RwLock::new(TextBoxState {
             event_reader: ManualEventReader::default(),
         }));
-        let cursor_pos = Signal::new(world, 0);
+        let init_cursor_pos = world.fgr_untrack(|world| props.contents.value(world).len());
+        let cursor_pos = Signal::new(world, init_cursor_pos);
         let init_contents = world.fgr_untrack(|world| props.contents.value(world).clone());
         let contents = Signal::new(world, init_contents);
         let props_contents = props.contents;
@@ -144,6 +145,9 @@ impl UiComponent<TextBoxProps> for TextBox {
             let mut state = state.write().unwrap();
             let keyboard_input_events = world.get_resource::<Events<KeyboardInput>>().unwrap();
             for event in state.event_reader.read(&keyboard_input_events) {
+                if !event.state.is_pressed() {
+                    continue;
+                }
                 match &event.logical_key {
                     Key::ArrowLeft => {
                         if new_cursor_pos > 0 {

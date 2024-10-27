@@ -1,4 +1,4 @@
-use bevy::{asset::AssetServer, color::{palettes::css::BLUE, Color}, ecs::event::ManualEventReader, input::keyboard::{Key, KeyboardInput}, prelude::{default, BuildWorldChildren, DespawnRecursiveExt, Entity, Events, NodeBundle, TextBundle, World}, text::{Text, TextStyle}, ui::{Overflow, Style, Val}};
+use bevy::{asset::AssetServer, color::{palettes::css::{BLUE, GREEN}, Color}, ecs::event::ManualEventReader, input::keyboard::{Key, KeyboardInput}, prelude::{default, BuildWorldChildren, DespawnRecursiveExt, Entity, Events, NodeBundle, TextBundle, World}, text::{Text, TextStyle}, ui::{BorderColor, Overflow, Style, UiRect, Val}};
 use std::{str::FromStr, sync::Arc};
 use std::sync::RwLock;
 
@@ -129,6 +129,11 @@ impl UiComponent<TextBoxProps> for TextBox {
         let textbox_id = world
             .spawn(
                 NodeBundle {
+                    style: Style {
+                        border: UiRect::all(Val::Px(2.0)),
+                        ..Default::default()
+                    },
+                    border_color: BorderColor(GREEN.into()),
                     ..Default::default()
                 }
             )

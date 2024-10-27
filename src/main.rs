@@ -35,7 +35,8 @@ fn main() {
                 ui::TextBox::run(
                     world,
                     ui::TextBoxProps {
-                        contents: ConstAccessor::new("testing textbox".into()).into(),
+                        width: Some(ConstAccessor::new(Val::Px(200.0)).into()),
+                        contents: Some(ConstAccessor::new("testing textbox".into()).into()),
                         ..Default::default()
                     }
                 ),

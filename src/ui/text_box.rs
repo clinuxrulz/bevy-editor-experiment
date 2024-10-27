@@ -1,23 +1,23 @@
-use bevy::{asset::AssetServer, color::{palettes::css::BLUE, Color}, ecs::event::ManualEventReader, input::{keyboard::{Key, KeyboardInput}, ButtonInput}, prelude::{default, BuildWorldChildren, DespawnRecursiveExt, Entity, EventReader, Events, KeyCode, NodeBundle, TextBundle, World}, text::{Text, TextStyle}, ui::{Overflow, Style, Val}, utils::tracing::Event, window::ReceivedCharacter};
-use std::{borrow::{Borrow, BorrowMut}, str::FromStr, sync::Arc};
+use bevy::{asset::AssetServer, color::{palettes::css::BLUE, Color}, ecs::event::ManualEventReader, input::keyboard::{Key, KeyboardInput}, prelude::{default, BuildWorldChildren, DespawnRecursiveExt, Entity, Events, NodeBundle, TextBundle, World}, text::{Text, TextStyle}, ui::{Overflow, Style, Val}};
+use std::{str::FromStr, sync::Arc};
 use std::sync::RwLock;
 
-use crate::{cloned, fgr::{Accessor, BoxedAccessor, ConstAccessor, FgrExtensionMethods, Memo, Signal}};
+use crate::{cloned, fgr::{Accessor, BoxedAccessor, FgrExtensionMethods, Memo, Signal}};
 
 use super::UiComponent;
 
 pub struct TextBoxProps {
-    pub width: BoxedAccessor<World, f32>,
-    pub height: BoxedAccessor<World, f32>,
-    pub contents: BoxedAccessor<World, String>,
+    pub width: Option<BoxedAccessor<World, Val>>,
+    pub height: Option<BoxedAccessor<World, Val>>,
+    pub contents: Option<BoxedAccessor<World, String>>,
 }
 
 impl Default for TextBoxProps {
     fn default() -> Self {
         Self {
-            width: ConstAccessor::new(100.0).into(),
-            height: ConstAccessor::new(50.0).into(),
-            contents: ConstAccessor::new("".into()).into(),
+            width: None,
+            height: None,
+            contents: None,
         }
     }
 }
@@ -33,15 +33,18 @@ impl UiComponent<TextBoxProps> for TextBox {
         let state = Arc::new(RwLock::new(TextBoxState {
             event_reader: ManualEventReader::default(),
         }));
-        let init_cursor_pos = world.fgr_untrack(|world| props.contents.value(world).len());
+        let props_contents = props.contents.clone();
+        let init_cursor_pos = world.fgr_untrack(|world| props_contents.map(|contents| contents.value(world).len()).unwrap_or(0));
         let cursor_pos = Signal::new(world, init_cursor_pos);
-        let init_contents = world.fgr_untrack(|world| props.contents.value(world).clone());
+        let props_contents = props.contents.clone();
+        let init_contents = world.fgr_untrack(|world| props_contents.map(|contents| contents.value(world).clone()).unwrap_or_default());
         let contents = Signal::new(world, init_contents);
-        let props_contents = props.contents;
-        Memo::new(world, cloned!((props_contents, contents) => move |world| {
-            let props_contents = props_contents.value(world).clone();
-            contents.update_value(world, |x| *x = props_contents);
-        }));
+        if let Some(props_contents) = props.contents {
+            Memo::new(world, cloned!((props_contents, contents) => move |world| {
+                let props_contents = props_contents.value(world).clone();
+                contents.update_value(world, |x| *x = props_contents);
+            }));
+        }
         let contents_length = Memo::new(world, cloned!((contents) => move |world| contents.value(world).len()));
         let cursor_pos_clamped = Memo::new(world, cloned!((cursor_pos, contents_length) => move |world| {
             let cursor_pos = *cursor_pos.value(world);
@@ -135,6 +138,28 @@ impl UiComponent<TextBoxProps> for TextBox {
                 contents_after_id,
             ])
             .id();
+        let props_width = props.width;
+        let props_width = Memo::new(world, move |world| {
+            if let Some(props_width) = &props_width {
+                return *props_width.value(world);
+            }
+            return Val::Auto;
+        });
+        let props_height = props.height;
+        let props_height = Memo::new(world, move |world| {
+            if let Some(props_height) = &props_height {
+                return *props_height.value(world);
+            }
+            return Val::Auto;
+        });
+        Memo::new(world, move |world| {
+            let props_width = *props_width.value(world);
+            let props_height = *props_height.value(world);
+            let mut textbox_entity = world.entity_mut(textbox_id);
+            let mut style = textbox_entity.get_mut::<Style>().unwrap();
+            style.width = props_width;
+            style.height = props_height;
+        });
         world.fgr_on_cleanup(cloned!((textbox_id) => move |world| {
             world.entity_mut(textbox_id).despawn_recursive();
         }));

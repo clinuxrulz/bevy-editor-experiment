@@ -77,7 +77,7 @@ impl UiComponent<TextBoxProps> for TextBox {
                     font_size: 20.0,
                     color: Color::WHITE,
                 },
-            ),
+            ).with_no_wrap(),
         ).id();
         world.fgr_create_effect(cloned!((contents_before) => move |world| {
             let contents_before = (**contents_before.value(world)).clone();
@@ -94,7 +94,7 @@ impl UiComponent<TextBoxProps> for TextBox {
                     font_size: 20.0,
                     color: Color::WHITE,
                 },
-            ),
+            ).with_no_wrap(),
         ).id();
         world.fgr_create_effect(cloned!((contents_after) => move |world| {
             let contents_after = (**contents_after.value(world)).clone();
@@ -131,6 +131,7 @@ impl UiComponent<TextBoxProps> for TextBox {
                 NodeBundle {
                     style: Style {
                         border: UiRect::all(Val::Px(2.0)),
+                        overflow: Overflow::clip_x(),
                         ..Default::default()
                     },
                     border_color: BorderColor(GREEN.into()),

@@ -97,6 +97,22 @@ impl<CTX: HasFgrCtx + 'static> FgrCtx<CTX> {
         id
     }
 
+    fn track_observed<R, CALLBACK: FnOnce(&Vec<NodeRef<CTX>>)->R>(&mut self, callback: CALLBACK) -> R {
+        let mut tmp = Vec::new();
+        std::mem::swap(&mut tmp, &mut self.observed_nodes);
+        let r = callback(&tmp);
+        std::mem::swap(&mut tmp, &mut self.observed_nodes);
+        r
+    }
+
+    fn track_created<R, CALLBACK: FnOnce(&Vec<NodeRef<CTX>>)->R>(&mut self, callback: CALLBACK) -> R {
+        let mut tmp = Vec::new();
+        std::mem::swap(&mut tmp, &mut self.created_nodes);
+        let r = callback(&tmp);
+        std::mem::swap(&mut tmp, &mut self.created_nodes);
+        r
+    }
+
     pub fn new() -> Self {
         Self {
             next_id: 0,

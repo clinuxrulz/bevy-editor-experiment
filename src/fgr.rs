@@ -98,19 +98,44 @@ impl<CTX: HasFgrCtx + 'static> FgrCtx<CTX> {
     }
 
     fn track_observed<R, CALLBACK: FnOnce(&mut CTX)->R>(ctx: &mut CTX, callback: CALLBACK) -> (Vec<NodeRef<CTX>>, R) {
+        let mut witness_observe = true;
         let mut tmp = Vec::new();
-        std::mem::swap(&mut tmp, &mut ctx.fgr_ctx().observed_nodes);
+        {
+            let mut fgr_ctx = ctx.fgr_ctx();
+            std::mem::swap(&mut witness_observe, &mut fgr_ctx.witness_observe);
+            std::mem::swap(&mut tmp, &mut fgr_ctx.observed_nodes);
+        }
         let r = callback(ctx);
-        std::mem::swap(&mut tmp, &mut ctx.fgr_ctx().observed_nodes);
+        {
+            let mut fgr_ctx = ctx.fgr_ctx();
+            std::mem::swap(&mut witness_observe, &mut fgr_ctx.witness_observe);
+            std::mem::swap(&mut tmp, &mut fgr_ctx.observed_nodes);
+        }
         (tmp, r)
     }
 
     fn track_created<R, CALLBACK: FnOnce(&mut CTX)->R>(ctx: &mut CTX, callback: CALLBACK) -> (Vec<NodeRef<CTX>>, R) {
+        let mut witness_created = true;
         let mut tmp = Vec::new();
-        std::mem::swap(&mut tmp, &mut ctx.fgr_ctx().created_nodes);
+        {
+            let mut fgr_ctx = ctx.fgr_ctx();
+            std::mem::swap(&mut witness_created, &mut fgr_ctx.witness_created);
+            std::mem::swap(&mut tmp, &mut fgr_ctx.created_nodes);
+        }
         let r = callback(ctx);
-        std::mem::swap(&mut tmp, &mut ctx.fgr_ctx().created_nodes);
+        {
+            let mut fgr_ctx = ctx.fgr_ctx();
+            std::mem::swap(&mut witness_created, &mut fgr_ctx.witness_created);
+            std::mem::swap(&mut tmp, &mut fgr_ctx.created_nodes);
+        }
         (tmp, r)
+    }
+
+    fn track_observed_and_created<R, CALLBACK: FnOnce(&mut CTX)->R>(ctx: &mut CTX, callback: CALLBACK) -> (Vec<NodeRef<CTX>>,Vec<NodeRef<CTX>>,R) {
+        let (created, (observed, r)) = FgrCtx::track_created(ctx, |ctx| {
+            return FgrCtx::track_observed(ctx, callback)
+        });
+        return (observed, created, r);
     }
 
     pub fn new() -> Self {
@@ -130,10 +155,7 @@ impl<CTX: HasFgrCtx + 'static> FgrCtx<CTX> {
     }
 
     pub fn untrack<R, CALLBACK: FnOnce(&mut CTX) -> R>(ctx: &mut CTX, callback: CALLBACK) -> R {
-        let mut tmp = Vec::new();
-        std::mem::swap(&mut ctx.fgr_ctx().observed_nodes, &mut tmp);
-        let result = callback(ctx);
-        std::mem::swap(&mut ctx.fgr_ctx().observed_nodes, &mut tmp);
+        let (_, result) = FgrCtx::track_observed(ctx, callback);
         result
     }
 
@@ -160,12 +182,10 @@ impl<CTX: HasFgrCtx + 'static> FgrCtx<CTX> {
             let scope = RootScope {
                 scope: Arc::new(RwLock::new(Vec::new())),
             };
-            ctx.fgr_ctx().witness_created = true;
-            let result = callback(ctx, scope.clone());
-            ctx.fgr_ctx().witness_created = false;
+            let (created_nodes, result) = FgrCtx::track_created(ctx, |ctx| callback(ctx, scope.clone()));
             {
                 let mut scope = (*scope.scope).write().unwrap();
-                for node in ctx.fgr_ctx().created_nodes.drain(..) {
+                for node in created_nodes {
                     scope.push(node);
                 }
             }
@@ -197,19 +217,15 @@ impl<CTX: HasFgrCtx + 'static> FgrCtx<CTX> {
         ctx.fgr_ctx().created_nodes.push(result.clone());
         ctx.fgr_ctx().stack.push(result.clone());
         ctx.fgr_ctx().defered_effects.push(Box::new(move |ctx| {
-            ctx.fgr_ctx().witness_created = true;
-            ctx.fgr_ctx().witness_observe = true;
-            (*effect).write().unwrap()(ctx);
-            ctx.fgr_ctx().witness_created = false;
-            ctx.fgr_ctx().witness_observe = false;
+            let (observed, created, r) = FgrCtx::track_observed_and_created(ctx, |ctx| (*effect).write().unwrap()(ctx));
             let mut impl_ = impl_.write().unwrap();
-            for node in ctx.fgr_ctx().observed_nodes.drain(..) {
+            for node in observed {
                 impl_.node_data_mut().dependencies.push(node.clone());
                 node.with_node_mut(|node| {
                     node.node_data_mut().dependents.push(result.clone());
                 });
             }
-            for node in ctx.fgr_ctx().created_nodes.drain(..) {
+            for node in created {
                 impl_.node_data_mut().scoped.push(node.clone());
             }
         }));
@@ -344,14 +360,13 @@ impl<CTX: HasFgrCtx + 'static> IsNode<CTX> for EffectImpl<CTX> {
         let Some(effect) = self.effect.as_ref() else { return false; };
         let effect = Arc::clone(effect);
         ctx.fgr_ctx().defered_effects.push(Box::new(move |ctx| {
-            ctx.fgr_ctx().witness_observe = true;
-            ctx.fgr_ctx().witness_created = true;
-            effect.write().unwrap()(ctx);
-            ctx.fgr_ctx().witness_observe = false;
-            ctx.fgr_ctx().witness_created = false;
+            let (observed, mut created, _r) = FgrCtx::track_observed_and_created(ctx, |ctx| {
+                let mut effect2 = effect.try_write().unwrap();
+                effect2(ctx);
+            });
             let mut dependencies_to_remove: Vec<NodeRef<CTX>> = Vec::new();
             let mut dependencies_to_add: Vec<NodeRef<CTX>> = Vec::new();
-            for dep in &ctx.fgr_ctx().observed_nodes {
+            for dep in &observed {
                 let has = self_node_ref.with_node(|self_node| self_node.node_data().dependencies.contains(dep));
                 if !has {
                     dependencies_to_add.push(dep.clone());
@@ -359,7 +374,7 @@ impl<CTX: HasFgrCtx + 'static> IsNode<CTX> for EffectImpl<CTX> {
             }
             self_node_ref.with_node(|self_node| {
                 for dep in &self_node.node_data().dependencies {
-                    let has = ctx.fgr_ctx().observed_nodes.contains(dep);
+                    let has = observed.contains(dep);
                     if !has {
                         dependencies_to_remove.push(dep.clone());
                     }
@@ -372,7 +387,7 @@ impl<CTX: HasFgrCtx + 'static> IsNode<CTX> for EffectImpl<CTX> {
                 self_node_ref.with_node_mut(|self_node| self_node.node_data_mut().dependencies.push(dep));
             }
             self_node_ref.with_node_mut(|self_node| {
-                std::mem::swap(&mut self_node.node_data_mut().scoped, &mut ctx.fgr_ctx().created_nodes);
+                std::mem::swap(&mut self_node.node_data_mut().scoped, &mut created);
             });
         }));
         false
